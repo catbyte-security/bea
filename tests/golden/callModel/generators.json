@@ -1,0 +1,452 @@
+{
+  "schema": "bea.callmodel-generators-golden/1",
+  "note": "S5 §7.6 generator goldens (WP11-CALL). Changing these rows is a breaking change: regenerate only for a reviewed algorithm change (BEA_WRITE_GOLDENS=1).",
+  "specs": [
+    {
+      "title": "f32 uniform [-10, 10]",
+      "columns": {
+        "dt": "f32"
+      },
+      "generate": {
+        "seed": 1,
+        "columns": {
+          "dt": {
+            "dist": "uniform",
+            "min": -10,
+            "max": 10
+          }
+        },
+        "grid": "cartesian",
+        "count": 16
+      },
+      "rows": [
+        {
+          "dt": "0xc009c1be"
+        },
+        {
+          "dt": "0xc102904a"
+        },
+        {
+          "dt": "0xc0aeaffb"
+        },
+        {
+          "dt": "0xbfef7e0a"
+        },
+        {
+          "dt": "0x40e04714"
+        },
+        {
+          "dt": "0x411bb2ae"
+        },
+        {
+          "dt": "0x4021ab49"
+        },
+        {
+          "dt": "0x410ae6fd"
+        },
+        {
+          "dt": "0x40d4ce5c"
+        },
+        {
+          "dt": "0x4107bde0"
+        },
+        {
+          "dt": "0xc004bae8"
+        },
+        {
+          "dt": "0xc1097446"
+        },
+        {
+          "dt": "0x40dc2e90"
+        },
+        {
+          "dt": "0x40d67dab"
+        },
+        {
+          "dt": "0xc0c6e34b"
+        },
+        {
+          "dt": "0x4066bb7b"
+        }
+      ]
+    },
+    {
+      "title": "f64 log_uniform [1e-3, 1e3] both signs",
+      "columns": {
+        "x": "f64"
+      },
+      "generate": {
+        "seed": 2,
+        "columns": {
+          "x": {
+            "dist": "log_uniform",
+            "min": 0.001,
+            "max": 1000,
+            "signs": "both"
+          }
+        },
+        "grid": "cartesian",
+        "count": 16
+      },
+      "rows": [
+        {
+          "x": "0xbf65e20b340f27f4"
+        },
+        {
+          "x": "0x3f650d9a2254f8e8"
+        },
+        {
+          "x": "0xc04803e8d2ae4364"
+        },
+        {
+          "x": "0x3f66581961e2d85d"
+        },
+        {
+          "x": "0xbfd0110e9e519edc"
+        },
+        {
+          "x": "0xc000e238e2f963e2"
+        },
+        {
+          "x": "0x40393b3ce32a7c36"
+        },
+        {
+          "x": "0xbf6cfb2a713ee1b0"
+        },
+        {
+          "x": "0xc08eef48a9ef0228"
+        },
+        {
+          "x": "0xbfa8e821f76d0a9d"
+        },
+        {
+          "x": "0x40638d66ad54ee02"
+        },
+        {
+          "x": "0xc0625c190c12f5aa"
+        },
+        {
+          "x": "0xc086685b86a4b144"
+        },
+        {
+          "x": "0xc014ba05220f1fde"
+        },
+        {
+          "x": "0x3f8dda737cb72fda"
+        },
+        {
+          "x": "0xc079f2afddb3a924"
+        }
+      ]
+    },
+    {
+      "title": "i32 uniform [-5, 5]",
+      "columns": {
+        "n": "i32"
+      },
+      "generate": {
+        "seed": 3,
+        "columns": {
+          "n": {
+            "dist": "uniform",
+            "min": -5,
+            "max": 5
+          }
+        },
+        "grid": "cartesian",
+        "count": 16
+      },
+      "rows": [
+        {
+          "n": "0xfffffffffffffffd"
+        },
+        {
+          "n": "0x3"
+        },
+        {
+          "n": "0xfffffffffffffffd"
+        },
+        {
+          "n": "0xffffffffffffffff"
+        },
+        {
+          "n": "0xfffffffffffffffd"
+        },
+        {
+          "n": "0x2"
+        },
+        {
+          "n": "0x4"
+        },
+        {
+          "n": "0x0"
+        },
+        {
+          "n": "0x3"
+        },
+        {
+          "n": "0xfffffffffffffffe"
+        },
+        {
+          "n": "0xfffffffffffffffb"
+        },
+        {
+          "n": "0x1"
+        },
+        {
+          "n": "0xfffffffffffffffe"
+        },
+        {
+          "n": "0x1"
+        },
+        {
+          "n": "0x2"
+        },
+        {
+          "n": "0x2"
+        }
+      ]
+    },
+    {
+      "title": "u64 bits_uniform",
+      "columns": {
+        "k": "u64"
+      },
+      "generate": {
+        "seed": 4,
+        "columns": {
+          "k": {
+            "dist": "bits_uniform"
+          }
+        },
+        "grid": "cartesian",
+        "count": 16
+      },
+      "rows": [
+        {
+          "k": "0xd550a96b6e579b62"
+        },
+        {
+          "k": "0xc21a33b0f345c89a"
+        },
+        {
+          "k": "0x6ae468a11256f40a"
+        },
+        {
+          "k": "0xf884d61a7fb78633"
+        },
+        {
+          "k": "0x1d6be027ccbb1295"
+        },
+        {
+          "k": "0x75d80062ef0be311"
+        },
+        {
+          "k": "0x576b20d263d8b57d"
+        },
+        {
+          "k": "0x950fa5cb37c05cfb"
+        },
+        {
+          "k": "0x97d21ebfe2bad473"
+        },
+        {
+          "k": "0xafc30a64327c40c8"
+        },
+        {
+          "k": "0xc611cdea71265baf"
+        },
+        {
+          "k": "0x6d2cefad19fd9316"
+        },
+        {
+          "k": "0x8f6074c7a249720e"
+        },
+        {
+          "k": "0x1117db3fa0324acc"
+        },
+        {
+          "k": "0xf44ca42b8210016e"
+        },
+        {
+          "k": "0xb5947e8faf9232b1"
+        }
+      ]
+    },
+    {
+      "title": "f32 edge",
+      "columns": {
+        "e": "f32"
+      },
+      "generate": {
+        "seed": 5,
+        "columns": {
+          "e": {
+            "dist": "edge"
+          }
+        },
+        "grid": "cartesian",
+        "count": 16
+      },
+      "rows": [
+        {
+          "e": "0x0"
+        },
+        {
+          "e": "0x80000000"
+        },
+        {
+          "e": "0x1"
+        },
+        {
+          "e": "0x7fffff"
+        },
+        {
+          "e": "0x800000"
+        },
+        {
+          "e": "0x3f800000"
+        },
+        {
+          "e": "0xbf800000"
+        },
+        {
+          "e": "0x3f000000"
+        },
+        {
+          "e": "0x40000000"
+        },
+        {
+          "e": "0x7f7fffff"
+        },
+        {
+          "e": "0xff7fffff"
+        },
+        {
+          "e": "0x7f800000"
+        },
+        {
+          "e": "0xff800000"
+        },
+        {
+          "e": "0x7fc00000"
+        },
+        {
+          "e": "0xffc00000"
+        },
+        {
+          "e": "0x7fa00000"
+        }
+      ]
+    },
+    {
+      "title": "cartesian grid 4x4 + per-row f64 uniform",
+      "columns": {
+        "a": "i32",
+        "b": "f32",
+        "c": "f64"
+      },
+      "generate": {
+        "seed": 6,
+        "columns": {
+          "a": {
+            "dist": "grid",
+            "values": "1,2,3,4"
+          },
+          "b": {
+            "dist": "grid",
+            "values": "0.5, 1.5, 2.5, 3.5"
+          },
+          "c": {
+            "dist": "uniform",
+            "min": 0,
+            "max": 1
+          }
+        },
+        "grid": "cartesian"
+      },
+      "rows": [
+        {
+          "a": "0x1",
+          "b": "0x3f000000",
+          "c": "0x3fa6e5c8d989b2f0"
+        },
+        {
+          "a": "0x1",
+          "b": "0x3fc00000",
+          "c": "0x3fec2cafd5b50921"
+        },
+        {
+          "a": "0x1",
+          "b": "0x40200000",
+          "c": "0x3fcbb48d08bde9ac"
+        },
+        {
+          "a": "0x1",
+          "b": "0x40600000",
+          "c": "0x3fe98275b3977c3d"
+        },
+        {
+          "a": "0x2",
+          "b": "0x3f000000",
+          "c": "0x3fadb3ab30205c70"
+        },
+        {
+          "a": "0x2",
+          "b": "0x3fc00000",
+          "c": "0x3fa4254f1be06fd0"
+        },
+        {
+          "a": "0x2",
+          "b": "0x40200000",
+          "c": "0x3faa6961dee86df0"
+        },
+        {
+          "a": "0x2",
+          "b": "0x40600000",
+          "c": "0x3fd567013eb6bd90"
+        },
+        {
+          "a": "0x3",
+          "b": "0x3f000000",
+          "c": "0x3fe4a9b6e5755f58"
+        },
+        {
+          "a": "0x3",
+          "b": "0x3fc00000",
+          "c": "0x3fd0dfdc80c935e2"
+        },
+        {
+          "a": "0x3",
+          "b": "0x40200000",
+          "c": "0x3fe215f06b945052"
+        },
+        {
+          "a": "0x3",
+          "b": "0x40600000",
+          "c": "0x3fe6b3305f0b657e"
+        },
+        {
+          "a": "0x4",
+          "b": "0x3f000000",
+          "c": "0x3fc58991673e34c0"
+        },
+        {
+          "a": "0x4",
+          "b": "0x3fc00000",
+          "c": "0x3fdb88aeefc41efe"
+        },
+        {
+          "a": "0x4",
+          "b": "0x40200000",
+          "c": "0x3fe39276a49d9d0e"
+        },
+        {
+          "a": "0x4",
+          "b": "0x40600000",
+          "c": "0x3fe207cd3e2f6dd9"
+        }
+      ]
+    }
+  ]
+}

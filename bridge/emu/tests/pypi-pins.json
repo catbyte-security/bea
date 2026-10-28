@@ -1,0 +1,48 @@
+{
+  "schema": "bea.pypi-pins/1",
+  "source": "PyPI JSON API (https://pypi.org/pypi/<name>/<version>/json), snapshot 2026-10-28",
+  "note": "Vendored subset: the binary wheels BEA's lock admits (win_amd64 + manylinux x86_64). Used by bridge/emu/tests/test_lock.py to re-derive requirements.lock.",
+  "packages": [
+    {
+      "name": "unicorn",
+      "version": "2.1.4",
+      "license": "BSD License",
+      "files": [
+        {
+          "filename": "unicorn-2.1.4-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "9d6e6dea140560de4ebd8446661f7ef84a357d428c14a3ef09dacd306ec8c239"
+        },
+        {
+          "filename": "unicorn-2.1.4-cp37-abi3-win_amd64.whl",
+          "sha256": "d7107500c64ce5c168fbff6bef9485b5db1350050036f4cea568650cf8bdbdf5"
+        }
+      ]
+    },
+    {
+      "name": "capstone",
+      "version": "5.0.9",
+      "license": null,
+      "files": [
+        {
+          "filename": "capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "sha256": "273fd8d747d2e35c88f91450be51a603ecfaafb00d96d9f315dcb8689c86193e"
+        },
+        {
+          "filename": "capstone-5.0.9-py3-none-win_amd64.whl",
+          "sha256": "732cedbbb56d42e723f14d7af6387f1454194a820b4b96b56d1e53f865ef85d0"
+        }
+      ]
+    },
+    {
+      "name": "pefile",
+      "version": "2024.8.26",
+      "license": "MIT",
+      "files": [
+        {
+          "filename": "pefile-2024.8.26-py3-none-any.whl",
+          "sha256": "76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f"
+        }
+      ]
+    }
+  ]
+}

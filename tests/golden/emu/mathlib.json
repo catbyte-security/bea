@@ -1,0 +1,91 @@
+{
+  "schema": "bea.emu-golden/1",
+  "fixture": "mathlib.dll",
+  "note": "Bits-only emulation goldens (S5 §2 tests/golden/emu): fixtures/native/mathlib.c built by scripts/build-fixtures.mjs, run through emu_call on an image session with the Windows default FP environment. Values are IEEE results of the C source; no pids, timestamps or absolute addresses. Checked by tests/boundary/emu/realBridge.test.ts.",
+  "cases": [
+    {
+      "export": "mf_lerp",
+      "signature": { "args": [{ "type": "f32" }, { "type": "f32" }, { "type": "f32" }], "returns": "f32" },
+      "args": ["0x3f800000", "0x40400000", "0x3f000000"],
+      "status": "returned",
+      "ret_bits": "0x40000000"
+    },
+    {
+      "export": "mf_spring",
+      "signature": {
+        "args": [{ "type": "f32" }, { "type": "f32" }, { "type": "f32" }, { "type": "f32" }],
+        "returns": "f32"
+      },
+      "args": ["0x3e800000", "0xbfc00000", "0x42200000", "0x40000000"],
+      "status": "returned",
+      "ret_bits": "0xc0e00000"
+    },
+    {
+      "export": "mf_spring",
+      "signature": {
+        "args": [{ "type": "f32" }, { "type": "f32" }, { "type": "f32" }, { "type": "f32" }],
+        "returns": "f32"
+      },
+      "args": ["0x447a0000", "0x0", "0x42200000", "0x40000000"],
+      "status": "returned",
+      "ret_bits": "0xc47a0000"
+    },
+    {
+      "export": "mf_poly",
+      "signature": {
+        "args": [{ "type": "f64" }, { "type": "f64" }, { "type": "f64" }, { "type": "f64" }],
+        "returns": "f64"
+      },
+      "args": ["0x4000000000000000", "0x3fe0000000000000", "0xbff4000000000000", "0x4008000000000000"],
+      "status": "returned",
+      "ret_bits": "0x4014000000000000"
+    },
+    {
+      "export": "mf_stack",
+      "signature": {
+        "args": [
+          { "type": "f32" },
+          { "type": "f32" },
+          { "type": "f32" },
+          { "type": "f32" },
+          { "type": "f32" },
+          { "type": "f64" },
+          { "type": "i32" }
+        ],
+        "returns": "f64"
+      },
+      "args": ["0x3fc00000", "0x40000000", "0x40400000", "0x3e800000", "0x40800000", "0x3fe0000000000000", 7],
+      "status": "returned",
+      "ret_bits": "0x4024800000000000"
+    },
+    {
+      "export": "mf_div",
+      "signature": { "args": [{ "type": "i32" }, { "type": "i32" }], "returns": "i32" },
+      "args": [7, 2],
+      "status": "returned",
+      "ret_bits": "0x3"
+    },
+    {
+      "export": "mf_div",
+      "signature": { "args": [{ "type": "i32" }, { "type": "i32" }], "returns": "i32" },
+      "args": [7, 0],
+      "status": "cpu_exception",
+      "ret_bits": null
+    },
+    {
+      "export": "mf_avx_dot",
+      "signature": { "args": [{ "type": "ptr" }, { "type": "ptr" }, { "type": "i32" }], "returns": "f32" },
+      "args": [0, 0, 0],
+      "status": "unsupported_instruction",
+      "ret_bits": null
+    },
+    {
+      "export": "mf_spin",
+      "signature": { "args": [{ "type": "i32" }], "returns": "i32" },
+      "args": [1],
+      "max_instructions": 10000,
+      "status": "budget_exhausted",
+      "ret_bits": null
+    }
+  ]
+}

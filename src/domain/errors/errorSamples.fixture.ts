@@ -1,0 +1,105 @@
+import type { BeaErrorOf, BeaErrorTag } from "./beaError.js";
+
+/** One representative error per tag. Exhaustive by type; used by tests and docs/errors.md generation. */
+export const ERROR_SAMPLES: { readonly [Tag in BeaErrorTag]: BeaErrorOf<Tag> } = {
+  InputError: {
+    _tag: "InputError",
+    operation: "read_memory",
+    issues: [{ path: "size", reason: "out_of_range", message: "Too big", maximum: 65536 }],
+  },
+  ConfigurationError: {
+    _tag: "ConfigurationError",
+    operation: "load_config",
+    settings: [{ setting: "BEA_HOME", constraint: "BEA_HOME must be an absolute path.", source: "env" }],
+  },
+  SessionNotFound: {
+    _tag: "SessionNotFound",
+    operation: "read_memory",
+    session_id: "00000000-0000-4000-8000-000000000001",
+  },
+  ReferenceNotFound: {
+    _tag: "ReferenceNotFound",
+    operation: "scan_next",
+    reference: { kind: "scan", id: "scan_0000000a" },
+  },
+  InvalidState: { _tag: "InvalidState", operation: "resume_process", state: "running", expected: ["suspended"] },
+  TargetExited: {
+    _tag: "TargetExited",
+    operation: "read_memory",
+    instance_id: `pi_${"a".repeat(64)}`,
+    exit: { code: 3221225477, code_hex: "0xC0000005", kind: "ntstatus", name: "STATUS_ACCESS_VIOLATION" },
+    detach_reason: "process-terminated",
+  },
+  InstanceMismatch: {
+    _tag: "InstanceMismatch",
+    operation: "attach_process",
+    expected_instance_id: `pi_${"b".repeat(64)}`,
+    observed: { pid: 1234, start_time: null },
+  },
+  AddressUnmapped: {
+    _tag: "AddressUnmapped",
+    operation: "read_memory",
+    address: "0x7ff6a0001000",
+    module_map_id: null,
+    instance_id: `pi_${"c".repeat(64)}`,
+  },
+  MemoryAccessFailed: {
+    _tag: "MemoryAccessFailed",
+    operation: "read_memory",
+    address: "0x10",
+    access: "read",
+    size: 4,
+  },
+  InstrumentationFailed: {
+    _tag: "InstrumentationFailed",
+    operation: "watch_memory",
+    reason: "no-free-slot",
+    address: "0x7ff6a0001000",
+    conflicting_id: null,
+  },
+  EffectUnreverted: {
+    _tag: "EffectUnreverted",
+    operation: "stop_instrumentation",
+    effect_ids: [`fx_${"d".repeat(64)}`],
+  },
+  AccessDenied: { _tag: "AccessDenied", operation: "attach_process", reason: "protected-process" },
+  UnsupportedTarget: { _tag: "UnsupportedTarget", operation: "spawn_process", reason: "wow64" },
+  CapabilityUnavailable: {
+    _tag: "CapabilityUnavailable",
+    operation: "spawn_process",
+    capability: "jobhost",
+    reason: "binary-missing",
+    retryable: false,
+  },
+  GateDisabled: { _tag: "GateDisabled", operation: "write_memory", gate: "write_memory" },
+  ProviderTimeout: { _tag: "ProviderTimeout", operation: "attach_process", timeout_ms: 30000, phase: "agent-ready" },
+  Cancelled: {
+    _tag: "Cancelled",
+    operation: "trace_execution",
+    by: "client",
+    partial: { kind: "retained-evidence", evidence_id: `ev_${"e".repeat(64)}` },
+  },
+  ResourceConstraint: {
+    _tag: "ResourceConstraint",
+    operation: "spawn_process",
+    resource: "capacity",
+    limits: { max_sessions: 4 },
+  },
+  EvidenceIntegrity: { _tag: "EvidenceIntegrity", operation: "import_evidence", reason: "id-mismatch" },
+  RevisionConflict: {
+    _tag: "RevisionConflict",
+    operation: "record_unknown",
+    unknown_id: `unk_${"f".repeat(64)}`,
+    expected_revision: 2,
+    actual_revision: 3,
+  },
+  FileOperationFailed: {
+    _tag: "FileOperationFailed",
+    operation: "export_evidence",
+    file_operation: "write",
+    path: "C:\\out\\bundle",
+    reason: "exists",
+  },
+  ProviderFailure: { _tag: "ProviderFailure", operation: "hook_function", provider: "agent" },
+  Internal: { _tag: "Internal", operation: "read_memory" },
+};

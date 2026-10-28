@@ -1,0 +1,629 @@
+{
+ "design_path": "<scratch>/bea-design/DESIGN.md",
+ "summary": "DESIGN.md has been revised in place to revision 2 (13,785 lines). All 11 blocking fixes are applied (CT-B1–B3, CI-B1–B8). All 26 important fixes are applied and none is rejected; 6 are applied in a modified form, each with its reason in the new Appendix C (Critique dispositions). Of the 38 minor findings, 37 are applied and one is declined with a reason (CI-M25).\n\nKey verifications in the revision lab (bea-lab/design-revise/):\n- **R1, oracle thunk as an SEH frame (CT-B1/B2).** The thunk is now a registered SEH frame: RtlAddFunctionTable with UNW_FLAG_EHANDLER, and a hand-assembled handler that calls RtlUnwindEx to reach a recovery label. It is called with exceptions:\"propagate\", and the dispatcher gains an \"in-call\" branch. Results:\n  - IsBadReadPtr(0x10) returns 1, and a C++ catch inside the callee returns 43.\n  - NULL faults are recovered with code, address and access recorded. 1,000 faults ran in 46 ms, and the thread's FP environment was restored.\n  - BEA guard-page traps (8) and debug-register traps raised during calls are handled, and the calls complete.\n  - A callee hooked by Frida's Interceptor is recovered after faulting.\n  The exact page bytes, unwind info and agent rules are in the new §5.3.1.\n- **R2, oversize request (CT-B3).** A 12.1 MB tools/call line now gets invalid_request and the server keeps serving. Fixes: an explicit StdioServerTransport with maxBufferSize 64 MiB, a per-contract maxInputBytes checked before parsing, and aggregate bounds on call-model inputs.\n- **§4 shared core.** It now has 177 blocks: 31 changed and 24 new, built on the integration critic's verified WP0 delta plus the CT fixes. New code includes composeSignal, outputPaths, sessionAccess, handle/dump/provisioner ports, seeded per-area limitation files, best-effort shutdown closers, the hard-exit timer armed at the first trigger, argv offline mode and file fields, and protocol amendments. It was re-extracted from the document byte-identically and passes tsc (host and shared, exit 0), the frida.Compiler agent build, vitest 31/31 and the stdio smoke.\n\nNew decisions D-INT-37 to D-INT-48 record these changes. The main ones beyond the above:\n- watch_memory \"auto\" now picks a debug register on every target; page-guard watches get a rate valve, and attached sessions get a leaked native exception-handler safety net.\n- BEA suspends its own guard pages around its memory reads.\n- Dumps restore original code bytes by default.\n- Spawned targets get an allowlisted environment.\n- Output paths and spawned programs are restricted by policy.\n- Oracle calls default to the target thread's FP environment.\n- Anti-cheat checks are scoped to the target.\n- HTTP mode evicts the least recently used idle session, idles out after 5 minutes, and returns 413 for oversized bodies.\n- Scenarios can create sessions.\n- Acceptance tests may only use earlier-wave tools.\n- Generated golden files and docs are split per area.\n- An integrator role is active from wave 1, and a cut line is declared.\n\nAppendix A.4 consolidates 36 annex errata. The estimate is now 122 developer-days, with a 51-day critical path.",
+ "tool_count": 37,
+ "tools": [
+  {
+   "name": "bea_status",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "list_processes",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "spawn_process",
+   "phase": "P1",
+   "gate": "none (interpreters/LOLBins refused unless user config spawn.allow_interpreters; target-scoped anti-cheat refusal, user-only override)"
+  },
+  {
+   "name": "attach_process",
+   "phase": "P1",
+   "gate": "none (target-scoped anti-cheat refusal, user-only override)"
+  },
+  {
+   "name": "resume_process",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "session_status",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "close_session",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "list_modules",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "list_memory_ranges",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "list_threads",
+   "phase": "P2",
+   "gate": "none"
+  },
+  {
+   "name": "read_memory",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "disassemble",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "list_module_symbols",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "map_address",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "scan_memory",
+   "phase": "P2",
+   "gate": "none"
+  },
+  {
+   "name": "scan_next",
+   "phase": "P2",
+   "gate": "none"
+  },
+  {
+   "name": "scan_results",
+   "phase": "P2",
+   "gate": "none"
+  },
+  {
+   "name": "hook_function",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "wait",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "stop_instrumentation",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "query_events",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "trace_api",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "watch_memory",
+   "phase": "P2",
+   "gate": "none"
+  },
+  {
+   "name": "trace_execution",
+   "phase": "P2",
+   "gate": "none"
+  },
+  {
+   "name": "export_coverage",
+   "phase": "P2",
+   "gate": "none (out_path policy)"
+  },
+  {
+   "name": "call_function",
+   "phase": "P1",
+   "gate": "call_attached (attached-targets only; BEA-owned targets allowed by default)"
+  },
+  {
+   "name": "write_memory",
+   "phase": "P3",
+   "gate": "write_memory (always; server opt-in)"
+  },
+  {
+   "name": "override_function",
+   "phase": "P3",
+   "gate": "override_function (always; server opt-in)"
+  },
+  {
+   "name": "run_script",
+   "phase": "P3",
+   "gate": "run_script (always; server opt-in)"
+  },
+  {
+   "name": "dump_memory",
+   "phase": "P2",
+   "gate": "none (out_path policy)"
+  },
+  {
+   "name": "emu_open",
+   "phase": "P2",
+   "gate": "none"
+  },
+  {
+   "name": "emu_call",
+   "phase": "P2",
+   "gate": "none"
+  },
+  {
+   "name": "diff_function",
+   "phase": "P2",
+   "gate": "call_attached (attached-targets; live leg only)"
+  },
+  {
+   "name": "get_evidence",
+   "phase": "P1",
+   "gate": "none"
+  },
+  {
+   "name": "export_evidence",
+   "phase": "P1",
+   "gate": "none (out_path policy)"
+  },
+  {
+   "name": "import_evidence",
+   "phase": "P3",
+   "gate": "none"
+  },
+  {
+   "name": "record_unknown",
+   "phase": "P2",
+   "gate": "none"
+  }
+ ],
+ "work_packages": [
+  {
+   "id": "WP0",
+   "title": "Scaffold and shared core (runs first, alone) · ≈ 6 d",
+   "owned_paths": [
+    "package.json, package-lock.json, LICENSE, root configs (.gitignore .gitattributes .npmrc .nvmrc .oxlintrc.json .oxfmtrc.json knip.json .lintstagedrc.json .husky/**), tsconfig.json, tsconfig.build.json, tsconfig.shared.json, vitest.config.ts",
+    "scripts/{bea,clean,build-agent,build-native,build-fixtures,generate,verify-module-boundaries,verify-test-discovery,catalog-golden,smoke-stdio}.mjs, scripts/lib/**",
+    "fixtures/native/**, fixtures/emu/** (bea_emu_fixture.c, live_fixture.c, cxx_catch.cpp), fixtures/golden/**",
+    "src/identity.ts, src/generated/**",
+    "src/shared/{hex,callPlan,agentProtocol,agentLimits,binaryLayouts}.ts",
+    "src/agent/{tsconfig.json,index.ts,buildInfo.ts}",
+    "src/domain §4 files incl. abort.ts, outputPaths.ts, evidence/limitations/index.ts",
+    "src/ports/** (incl. handles.ts, dumps.ts, provisioner.ts)",
+    "src/contracts/{effects,toolContract,index}.ts, src/contracts/schemas/**",
+    "src/application §4 files incl. sessionAccess.ts, handles/createHandleRegistry.ts, services/index.ts, handlers/index.ts, instruments/kinds/index.ts",
+    "src/server/*.ts (not http), src/cli/{argv,output}.ts, src/main/{mcp,mcpStdio,processShutdown,composeServices}.ts",
+    "docs/{tools.md (index), errors.md, error-contract.schema.json}",
+    "tests/globalSetup.ts, tests/support/{mcp/**,fakes/fakeServices.ts,process/**,workspace/**,frida/gate.ts,acceptance/**}",
+    "tests/contracts/{contractInvariants,envelope,catalogBudget}.test.ts, tests/golden/catalog.json (index), tests/unit/{integratedCore,revisionCore}.test.ts, tests/boundary/mcp/{statusMcp,oversize}.test.ts",
+    "day-0 stubs handed over to owners: §4 *(stub)* files incl. the 12 limitations/<area>.ts, application/dump/createDumpService.ts, providers/emulator/venvProvisioner.ts, cli/shorthands.ts; native/jobhost/bea-jobhost.c; empty per-area generated slices"
+   ],
+   "depends_on": [],
+   "summary": "Copies the 177 verified §4 files byte for byte, then runs npm run format once (semantic freeze), writes the revised lint/format/knip configs (printWidth 120, day-0 knip rules, AbortSignal.any and child_process rules, no tests under src/agent), and builds generate.mjs with per-area generated slices. Also builds the build pipeline (agent via frida.Compiler, jobhost via gcc), the fixtures including the emulator fixtures, and the test harnesses. All cross-WP ports are complete before the freeze.",
+   "acceptance": [
+    "npm ci && npm run check passes (tsc host and shared, oxlint + module boundaries, oxfmt after the format run, day-0 knip, test discovery)",
+    "npm test passes: contractInvariants, statusMcp, integratedCore, revisionCore (31 tests, as in the revision lab)",
+    "npm run build produces dist/, dist/agent/bea-agent.{js,json} (40 stubbed RPCs) and dist/native/win32-x64/bea-jobhost.{exe,json}; bea-jobhost.exe probe ok:true",
+    "bea version prints 0.1.0; stdio smoke: tools/list=[bea_status], poll envelope, invalid input -> invalid_request, close -> exit 0 < 2 s, no leftover processes",
+    "npm run build:fixtures builds the five native fixtures and the emu fixtures; manifest invariants hold (named skip without gcc)",
+    "negative checks: missing handler / missing agent method / reserved envelope key fail compilation or contract tests",
+    "oversize regression: a 12.1 MB tools/call line -> invalid_request, the next call succeeds, the server does not exit"
+   ]
+  },
+  {
+   "id": "WP1",
+   "title": "WP1-EVID — Evidence store, recordings registry, evidence tools · ≈ 9 d",
+   "owned_paths": [
+    "src/providers/evidence/** (incl. createEvidenceRuntime.ts, zip.d.ts)",
+    "src/domain/evidence/{invariants,build,authenticate}.ts, src/domain/redaction/**, src/domain/unknowns/**, src/domain/evidence/limitations/evidence.ts",
+    "src/application/evidence/**, src/application/instruments/{RecordingRegistry,createRecordingRegistry}.ts",
+    "src/contracts/areas/evidence.ts, src/application/handlers/evidence.ts",
+    "tests/support/fakes/fakeEvidence.ts, tests/{unit,boundary/mcp,acceptance}/evidence/**, docs/evidence.md, generated slices of area evidence"
+   ],
+   "depends_on": [
+    "WP0"
+   ],
+   "summary": "The ledger, blobs, streams (with checkpoint through StreamSpec.flush), quotas, Recorder, instance/module-map/effect/unknown registries and bundles. Finalize is fenced first (late appends are rejected and counted). Also provides the storage status contributor, the generic NDJSON reader for host row streams, export_evidence with the out_path policy, and the RecordingRegistry (the agent arms resume-clock timers; the registry displays ends_in_ms). Tools: get_evidence, export_evidence, import_evidence, record_unknown.",
+   "acceptance": [
+    "S2 §22 unit/integration lists (canonical vs oracle, ids, invariants, coverage algebra, effects machine, ledger torn tail/conflict/reserve, stream codec/chain/gaps/quota/redaction, bundles dir+zip, unknown CAS, redaction)",
+    "MCP boundary tests for the 4 tools with fakes",
+    "export -> import_evidence validate_only round trip; tamper -> evidence_integrity_mismatch with the ledger unchanged; quota -> resource_constraint + partial manifest; finalize fsyncs and closes the run; 20k records <= 2 s",
+    "wave rule: the 'after read/diff' rows are asserted on records written through Recorder directly"
+   ]
+  },
+  {
+   "id": "WP2",
+   "title": "WP2-PROC — Process containment (bea-jobhost) · ≈ 2 d",
+   "owned_paths": [
+    "native/jobhost/**",
+    "src/providers/process/** (incl. createJobHostFactory.ts)",
+    "src/domain/process/ntstatus.ts",
+    "tests/{unit,boundary/process}/process/**"
+   ],
+   "depends_on": [
+    "WP0"
+   ],
+   "summary": "The bea-jobhost C helper (protocol 1) and its TS wrapper (adopt/spawn/watch/inspect/probe), HelperLocator, ProcessInspector, BoundedCapture and posix best-effort ownership, plus NTSTATUS names. It contributes the jobhost status row and the doctor checks jobhost:binary, jobhost:probe and host:elevation (from bea-jobhost inspect of its own pid).",
+   "acceptance": [
+    "process lane = S3 jh-smoke/jh-fd4 cases 1:1 (probe; inspect self; identity refusals before assignment; nested-job adopt; EOF kill; stragglers kept then killed; watch never kills; kill while suspended; fd4 stdin)",
+    "every status line validates against jobHostEventSchema",
+    "kill() escalation to TerminateProcess(helper) still kills the tree"
+   ]
+  },
+  {
+   "id": "WP3",
+   "title": "WP3-AGENT — Agent core runtime · ≈ 8 d",
+   "owned_paths": [
+    "src/agent/{state,rpc,errors,coreRpc,jobs,instruments,inspect,memory,env,encode,win32,events,ack,exceptions,modules,threads,originals,capture,disasm,stalkerCo,fingerprint,guards,calls}.ts",
+    "src/agent/native/**, src/agent/pure/core*.ts",
+    "tests/unit/agent/core/**, tests/acceptance/agent/**, tests/support/agent/**"
+   ],
+   "depends_on": [
+    "WP0"
+   ],
+   "summary": "AgentCore, RPC wrapping and error mapping, event streams with batching and flow control, ack receivers, and THE exception dispatcher with routing DR traps -> guard/TF steps -> in-call branch -> Cloak -> first-chance. Also provides the calls registry used by the SEH-frame thunk; the guards module (withBeaGuardsSuspended, listRanges re-insertion, re-arming a stolen guard); instrument lifetimes with clock:'resume'; and core inspection and memory RPCs. dispose is verified to run on host kill.",
+   "acceptance": [
+    "build:agent with zero diagnostics; bundle <= 512 KiB",
+    "unit tests over src/agent/pure/core*",
+    "raw-Frida tests: ready -> hello -> status; readMemory tuple; listModules epoch on LoadLibrary; crash under a job -> report + ack + 0xC0000005; fast-exit flush delivers every row",
+    "in-call exceptions -> in-call rows and no blocking report; a planted value on a BEA-guarded page is found through withBeaGuardsSuspended and the guard stays armed",
+    "dispose restores protections, also when the host is killed with taskkill /F"
+   ]
+  },
+  {
+   "id": "WP4",
+   "title": "WP4-SESS — Frida host, sessions, session tools · ≈ 9 d",
+   "owned_paths": [
+    "src/providers/frida/** (incl. createSessionService.ts, antiCheatSignals.ts, spawnEnv.ts, userScript.ts)",
+    "src/application/sessions/**",
+    "src/contracts/areas/sessions.ts, src/application/handlers/sessions.ts",
+    "src/application/instruments/kinds/{exceptions,modules,output}.ts, src/domain/evidence/limitations/sessions.ts",
+    "tests/support/frida/fakeFrida.ts, tests/support/fakes/{fakeSession,fakeAgentRpc}.ts, tests/{unit,boundary/mcp,acceptance}/sessions/**"
+   ],
+   "depends_on": [
+    "WP0",
+    "WP1",
+    "WP2",
+    "WP3"
+   ],
+   "summary": "FridaHost, SessionManager (admission, FIFO, close, closeAll), spawn/attach paths, AgentChannel and AgentRpcClient, EventPump/StreamBinder, CrashProtocol and crash derivation. Implements the D-INT-39 session ports (LiveSession.jobs, scripts, crash(); onSessionEnded; StreamSpec.flush; StreamBinder.end returning the manifest). Spawn safety: allowlisted environment passed as envp, interpreter/LOLBin refusal, target-scoped anti-cheat signals with a per-image override and a machine-wide status note. Also: the resumed post, hello.limits.max_instruments=16, and tools bea_status, list_processes, spawn_process, attach_process, resume_process, session_status, close_session.",
+   "acceptance": [
+    "S3 §21 fast-lane cases 1-12 (fakes)",
+    "S6 §10.8 rows for the 7 tools with the §8.4 anti-cheat/environment/interpreter edits (wave rule: READY via LiveSession.waitFor, bytes via raw readMemory)",
+    "close of 3 piped owned + 1 attached + 1 fake external < 2 s, exit 0, attached target alive; hard server kill leaves no owned target",
+    "crashy av-write -> exit.code_hex 0xC0000005 and a CrashReport via LiveSession.crash",
+    "jobs.await returns a dump job's blobs; scripts.run leaves no extra script; onSessionEnded fires once; the resumed post arms a clock:'resume' timer",
+    "list_processes never injects"
+   ]
+  },
+  {
+   "id": "WP5",
+   "title": "WP5-ADDR — Address model, PE reader, map_address, list_module_symbols · ≈ 6 d",
+   "owned_paths": [
+    "src/providers/pe/** (incl. createPeServices.ts)",
+    "src/domain/address/{grammar,rebase,verify,symbolize}.ts",
+    "src/application/address/** (incl. createAddressService.ts)",
+    "src/contracts/areas/address.ts, src/application/handlers/address.ts, src/domain/evidence/limitations/address.ts",
+    "tests/{unit,boundary/mcp,acceptance}/address/**, tests/unit/pe/**, docs/address-model.md"
+   ],
+   "depends_on": [
+    "WP0",
+    "WP1",
+    "WP4"
+   ],
+   "summary": "The AddrExpr parser (incl. module:0xVA/0xBASE and $main). AddressService covers resolve/validate/describe/describeCode/fromFrameRef/prepare/verify over live, emulation (late-bound EmuPort) and file spaces. Also the PE reader and caches, byte verification, FootprintScanner, and caller symbol tables. Tools: map_address (variadic CLI) and list_module_symbols, both with an offline --pe-path mode.",
+   "acceptance": [
+    "S2 §22 grammar/PE/verify lists (pefile oracle, named skip without pefile); AddrExpr round-trip property",
+    "S6 §10.8 rows for map_address and list_module_symbols (rows that need hooks or writes move to WP7/WP12)",
+    "crashy pc.at equals the manifest crash site and pc.sym is the exported crash function (moved from WP4)"
+   ]
+  },
+  {
+   "id": "WP6",
+   "title": "WP6-INSPECT — Inspection tools · ≈ 4 d",
+   "owned_paths": [
+    "src/agent/code.ts, src/agent/pure/code*.ts",
+    "src/application/inspect/**",
+    "src/contracts/areas/inspect.ts, src/application/handlers/inspect.ts, src/domain/evidence/limitations/inspect.ts",
+    "tests/{unit,boundary/mcp,acceptance}/inspect/**"
+   ],
+   "depends_on": [
+    "WP4",
+    "WP5"
+   ],
+   "summary": "Agent disassemble (original-byte overlay, RIP-relative resolution, function mode). Tools: list_modules, list_memory_ranges, list_threads, read_memory and disassemble, covering live and emulation sessions via anySessionOp and EmuPort.",
+   "acceptance": [
+    "S6 §10.8 rows for the 5 tools, pointer-free and manifest-driven (the hooked-disassembly row moves to WP7)",
+    "emulation variants through anySessionOp and a fake EmuPort in boundary tests"
+   ]
+  },
+  {
+   "id": "WP7",
+   "title": "WP7-HOOK — Recordings, hooks, wait/stop/query · ≈ 7 d",
+   "owned_paths": [
+    "src/agent/{hooks,hookNative}.ts, src/agent/pure/hook*.ts",
+    "src/application/instruments/{QueryEngine,summaryUtil}.ts, src/application/instruments/kinds/hook.ts",
+    "src/contracts/areas/instrument.ts, src/application/handlers/instrument.ts, src/cli/shorthands.ts (fills the WP0 stub), src/domain/evidence/limitations/instrument.ts",
+    "tests/{unit,boundary/mcp,acceptance}/instrument/**"
+   ],
+   "depends_on": [
+    "WP4",
+    "WP5"
+   ],
+   "summary": "QueryEngine over recordings and over host row streams by stream_id. The hook kind and the agent hook engine (per-listener agentCallTids suppression, native ring tier, deny list, probe mode). Tools: hook_function (bytes_match_file via AddressService.verify), wait (scan/write ids via HandleRegistry, crash via LiveSession.crash), stop_instrumentation (HandleRegistry.stop, manifest ids), query_events (recording_id or stream_id), plus the CLI --capture shorthand.",
+   "acceptance": [
+    "S6 §10.8 rows for hook_function (mix_args stack floats exact, ret == speed@leave), wait, stop_instrumentation, query_events",
+    "native tier >= 1 M events/s with zero torn records over 5 s, or disabled with a limitation",
+    "moved rows: hook installed before resume sees frame 0; map_address after hooking still match; disassemble with a hook shows hooked_bytes_restored"
+   ]
+  },
+  {
+   "id": "WP8",
+   "title": "WP8-BEHAV — API behavior profiles (trace_api) · ≈ 7 d",
+   "owned_paths": [
+    "src/shared/apiProfiles.ts, src/domain/winConstants.ts",
+    "src/agent/{profiles,profileDecoders,memmap}.ts, src/agent/pure/profile*.ts",
+    "src/application/behavior/**, src/application/instruments/kinds/api.ts",
+    "src/contracts/areas/behavior.ts, src/application/handlers/behavior.ts, src/domain/evidence/limitations/behavior.ts (six seeded 'always' limitations)",
+    "tests/{unit,boundary/mcp,acceptance}/behavior/**"
+   ],
+   "depends_on": [
+    "WP7"
+   ],
+   "summary": "The six typed API profiles (file, registry, network, process, module_load, memory_protection) at the NT layer, ws2_32/dnsapi and selected kernelbase APIs. Includes the API catalog and decoders, the agent profile engine (handle cache, parent tracking, lazy installs, Cloak filtering, memmap watcher), ApiSummary, and the trace_api tool.",
+   "acceptance": [
+    "the trace_api summary equals the behavior.exe table exactly (paths, ops, byte counts, NAME_NOT_FOUND probe, registry key/values, 127.0.0.1 TCP/UDP, child process + exit, module load/fail, RW->RX->RW protections, RWX allocation)",
+    "BEA's own activity is absent; the registry key is gone after the run"
+   ]
+  },
+  {
+   "id": "WP9",
+   "title": "WP9-WATCH — Watchpoints, Stalker, coverage export · ≈ 9 d",
+   "owned_paths": [
+    "src/agent/{watch,trace,hwbp,pageguard,poll,traceKernels,watchSafetyNet}.ts, src/agent/pure/{watch,trace,dr7}*.ts",
+    "src/application/watch/**, src/application/instruments/kinds/{watch,poll,trace}.ts",
+    "src/contracts/areas/watch.ts, src/application/handlers/watch.ts, src/domain/evidence/limitations/watch.ts",
+    "tests/{unit,boundary/mcp,acceptance}/watch/**, tests/support/drcov.ts"
+   ],
+   "depends_on": [
+    "WP7",
+    "WP5"
+   ],
+   "summary": "Debug-register watches (auto picks a DR on every target; WatchRow.mem structured operand). The page-guard + trap-flag engine with a rate valve (20,000 traps/s -> rate-limit end) and suspension windows counted via WP3's guard table. The attached-session native VEH safety net and the poll watcher. Stalker modes with on_call and entry-block synthesis, drcov/modoff writers, export_coverage with the out_path policy. Tools: watch_memory, trace_execution, export_coverage.",
+   "acceptance": [
+    "S6 §10.8 rows + the page_guard no-missed-hits edit; DR write watch on car+8 -> exactly the manifest writer, struct_base = car, insn_confidence exact",
+    "stop -> DR7 = 0 on every thread; drcov parses with tests/support/drcov.ts; on_call coverage lies in physics_step's .pdata range + callees and includes the entry block",
+    "auto on an attached target picks a DR; hot DR watch + host taskkill /F leaves the target alive (safety net); a page_guard watch on a hot page ends with rate-limit and the target keeps running",
+    "moved row: stop_instrumentation of a DR watch"
+   ]
+  },
+  {
+   "id": "WP10",
+   "title": "WP10-SCAN — Cheat-Engine-style scans · ≈ 5 d",
+   "owned_paths": [
+    "src/agent/{scan,scanKernels}.ts, src/agent/pure/scan*.ts",
+    "src/application/scans/**",
+    "src/contracts/areas/scan.ts, src/application/handlers/scan.ts, src/domain/evidence/limitations/scan.ts",
+    "tests/{unit,boundary/mcp,acceptance}/scan/**"
+   ],
+   "depends_on": [
+    "WP4",
+    "WP5"
+   ],
+   "summary": "The agent scan engine: sliced first/next jobs, CModule kernels, scanSync, findPointers and snapshots, all through withBeaGuardsSuspended. Host ScanService: hit store, 8 scans per session, released on onSessionEnded, the 'scan' HandleKindSpec registered, results via LiveSession.jobs.await. Tools: scan_memory, scan_next, scan_results (AddressService.prepare per page).",
+   "acceptance": [
+    "S6 §10.8 rows on the f32 equilibrium (20.0 hits include car+8; markers; pointer_to g_world with kind image; increased after RAMP awaited via LiveSession.waitFor keeps car+8)",
+    "a 1 GiB scan (game_sim --ballast-mb 1024) does not stall agent RPC latency > 50 ms",
+    "a value on a page-guard-watched page is found and the watch keeps recording",
+    "moved rows: wait on a scan id; stop_instrumentation releasing a scan"
+   ]
+  },
+  {
+   "id": "WP11",
+   "title": "WP11-CALL — Call model and in-process oracle · ≈ 7 d",
+   "owned_paths": [
+    "src/domain/callModel/{classify,normalize,codecs,decode,floatBits,generators,fpEnv}.ts",
+    "src/agent/{call,callThunk}.ts, src/agent/pure/call*.ts",
+    "src/application/call/** (incl. createOracleService.ts)",
+    "src/contracts/areas/call.ts, src/application/handlers/call.ts, src/domain/evidence/limitations/call.ts",
+    "tests/{unit,boundary/mcp,acceptance}/call/**, tests/golden/callModel/**"
+   ],
+   "depends_on": [
+    "WP4",
+    "WP5"
+   ],
+   "summary": "The flattened call model (classification, normalization, codecs, generators, ulp helpers, fpEnv resolution shared with EMU). The exact-bits thunk executor is the registered SEH frame of §5.3.1, called with exceptions:'propagate', with a steal fallback that carries a limitation. Thread calls use tokens, quarantine and a ThreadBusy refusal; thread_at runs chunks at a hook safe point; init_from buffers; 'observe' requires a thread. OracleService checks the gate before any RPC, applies callInputBudget and the 48 MiB maxInputBytes, records bea.call.oracle with fp.source, and writes call-batch row streams. Tool: call_function.",
+   "acceptance": [
+    "unit: classification table, codecs, generator goldens",
+    "physics_step vectors bit-exact vs a JS Math.fround reference; the S5 §9.6 12-vector set on live_fixture",
+    "NULL argument -> per-vector fault (code, access, address), target survives; attached target without the gate -> capability_unavailable before any agent RPC",
+    "SEH-frame checks: IsBadReadPtr(0x10)=1; cxx_catcher(1)=43 with callee_exceptions >= 1; 1,000 faulting vectors without leak; MXCSR restored; a call touching a page-guard-watched struct completes with the watch recording; a DR-watched thread_id call completes",
+    "thread in a syscall -> invalid_state; a timed-out thread closure later runs as a no-op; fp.source thread with MXCSR 0x9FC0 reproduces FTZ; init_from feeds identical bytes and g_car is unchanged"
+   ]
+  },
+  {
+   "id": "WP12",
+   "title": "WP12-MODIFY — Gated modification tools · ≈ 4 d",
+   "owned_paths": [
+    "src/agent/{memwrite,override}.ts, src/agent/pure/modify*.ts",
+    "src/application/modify/**, src/application/instruments/kinds/override.ts",
+    "src/contracts/areas/modify.ts, src/application/handlers/modify.ts, src/domain/evidence/limitations/modify.ts",
+    "tests/{unit,boundary/mcp,acceptance}/modify/**"
+   ],
+   "depends_on": [
+    "WP7",
+    "WP5"
+   ],
+   "summary": "Agent writes (patchCode or protect-and-restore, read-back, revert by write id) and overrides (args/return/replace). run_script goes through LiveSession.scripts (MODIFY keeps the gate, fingerprint before/after, the effect and the evidence; CLI fileFields). The 'write' HandleKindSpec is registered. Tools: write_memory, override_function, run_script, all behind server-level gates.",
+   "acceptance": [
+    "S6 §10.8 rows for the 3 tools with gates on and off (off -> capability_unavailable with the exact enable text and no agent RPC)",
+    "revert restores bytes equal to the file; run_script leaves no extra script",
+    "moved row: map_address after a gated write still reports match with own_effects_restored > 0"
+   ]
+  },
+  {
+   "id": "WP13",
+   "title": "WP13-DUMP — Dumps and bea.dump/1 bundles · ≈ 5 d",
+   "owned_paths": [
+    "src/agent/dump.ts, src/agent/pure/dump*.ts",
+    "src/domain/dumpBundle.ts (pure zod schema)",
+    "src/application/dump/** (incl. createDumpService.ts, PeDumpWriter, DumpBundleWriter, patchRestore, verifyDumpBundle)",
+    "src/contracts/areas/dump.ts, src/application/handlers/dump.ts, src/domain/evidence/limitations/dump.ts",
+    "tests/{unit,boundary/mcp,acceptance}/dump/**"
+   ],
+   "depends_on": [
+    "WP4",
+    "WP5"
+   ],
+   "summary": "Agent dump jobs: blob messages, suspended captures, thread state with real FPCW/MXCSR, original_bytes splice of BEA patches, chunks read through withBeaGuardsSuspended. Host: the PE writer (pe_realigned, mapped, rebase_to) and the bea.dump/1 bundle writer behind DumpCapturePort (shared with emu_open). Foreign patches are restored from the relocated file image, with restored_patches[] and a live_bytes opt-out; out_path goes through the policy. Tool: dump_memory (CLI positional = module).",
+   "acceptance": [
+    "S6 §10.8 dump_memory row; a game_sim bundle verifies with verifyDumpBundle and contains the chosen thread's TEB",
+    "with physics_step hooked, dumped physics_step bytes equal the relocated file bytes (restored_patches lists the hook), Frida's LdrLoadDll patch is restored; live_bytes:true keeps the jump",
+    "an out_path in a Startup folder or ending in .cmd -> access_denied{policy}",
+    "L-S6-6 (realigned + preferred rebase loads in Ghidra/REA) recorded as a manual receipt"
+   ]
+  },
+  {
+   "id": "WP14",
+   "title": "WP14-EMU — Emulator bridge, emulation tools, diff · ≈ 15 d",
+   "owned_paths": [
+    "bridge/emu/**",
+    "src/providers/emulator/** (incl. createEmulatorService.ts, venvProvisioner.ts)",
+    "src/application/emu/**, src/application/diff/**",
+    "src/contracts/areas/emulation.ts, src/application/handlers/emulation.ts, src/domain/evidence/limitations/emulation.ts",
+    "scripts/{verify-emulation,build-bridge}.mjs, tests/support/emu/**, tests/{unit/emu,boundary/emu,boundary/mcp/emulation,acceptance/emulation}/**, tests/golden/emu/**, docs/emulation.md"
+   ],
+   "depends_on": [
+    "WP0",
+    "WP1",
+    "WP4",
+    "WP11",
+    "WP13"
+   ],
+   "summary": "The Unicorn bridge (bea-emu/0.1, snapshots v2, ISA guard v2 with the INT3 rule, HLE, dump-backed sessions, self memory cap), the TS client (900 ms kill escalation), the python resolver (BEA_PYTHON > config > venv > PATH), and the provisioner behind the WP0 port. Implements EmuPort lookup/modules/info and the external session driver detail. EmulationService opens live captures through DumpCapturePort. DiffService resolves fp once, reads init_from once, and treats steal-fallback vectors as inconclusive. Tools: emu_open, emu_call (CLI 'emulate'), diff_function.",
+   "acceptance": [
+    "S5 §14 lanes (bridge selftest, fakeBridge client, emulation lane, parity lane)",
+    "S6 §10.8 rows for the 3 tools with the Appendix A.4 errata; live-vs-emulator 12-vector parity; dump-backed physics_step equals live",
+    "hooked physics_step -> emu_open {live_session_id} -> emu_call equals the live result",
+    "restart policy: killing the bridge reopens on the next call, named snapshots reported lost",
+    "emu_call/diff input schemas <= 12 KiB and depth <= 10; moved row: export_coverage of emulation evidence"
+   ]
+  },
+  {
+   "id": "WP15",
+   "title": "WP15-CLI — CLI, scenarios, doctors, setup · ≈ 7 d",
+   "owned_paths": [
+    "src/cli/** except argv.ts, output.ts (WP0) and shorthands.ts (HOOK)",
+    "src/main/{cli,mcpDoctor}.ts, scripts/build-skill.mjs",
+    "tests/support/cli/**, tests/boundary/cli/**, docs/{cli,setup}.md"
+   ],
+   "depends_on": [
+    "WP0"
+   ],
+   "summary": "The router with generated commands: offline --pe-path mode, fileFields file reads, expandCliShorthands before parsing, the schema number grammar. Also: one-shot and instrument runners, and the scenario runner (bea-scenario/1 with session-creating steps, teardown of every created session, the session_id injection rule), plus bea mcp doctor, bea doctor and bea setup/uninstall (--emulator via the EmulatorProvisioner port) and build-skill. Lands bea setup --skill before WP17's doctor check.",
+   "acceptance": [
+    "S1 §8 cli-boundary list",
+    "bea mcp doctor passes against the built server; bea doctor creates nothing under a temp BEA_HOME",
+    "bea map a b --pe-path X runs offline; bea script hook.js --pid N reads the file",
+    "a scenario with emu_open and diff_function steps validates and tears down both sessions (fakes)"
+   ]
+  },
+  {
+   "id": "WP16",
+   "title": "WP16-HTTP — bea mcp --http · ≈ 3 d",
+   "owned_paths": [
+    "src/server/http/**",
+    "src/main/{mcpHttp,mcpHttpEntry}.ts",
+    "tests/support/http/**, tests/boundary/http/**, docs/http.md"
+   ],
+   "depends_on": [
+    "WP0"
+   ],
+   "summary": "127.0.0.1-only streamable HTTP with Host/Origin/path/bearer-token checks and a 64 MiB body limit (413). The session map holds up to 4 sessions with LRU eviction of idle ones at capacity and 5-minute idle eviction. Also: the connection file (owner-only DACL outside the profile), authenticated POST /shutdown, and the amended Python recipe (launch node scripts/bea.mjs directly, DELETE in finally, stop via /shutdown).",
+   "acceptance": [
+    "S1 §8 http list (401, bad Host 403, unknown session 404, cancellation, /shutdown 202 -> exit 0, connection file removed)",
+    "413 for a 65 MiB body; a 5th client evicts the idle LRU session; 503 only when 4 are busy; idle eviction after 5 min (fake clock)",
+    "the urllib Python recipe initializes, calls bea_status, reconnects while a BEA session persists, deletes its session in finally, stops via /shutdown"
+   ]
+  },
+  {
+   "id": "WP17",
+   "title": "WP17-DOCS — Skill and documentation · ≈ 4 d",
+   "owned_paths": [
+    "skills/**",
+    "README.md, SECURITY.md, THIRD_PARTY_NOTICES.md",
+    "docs/{architecture,security,testing}.md; docs/{decisions,limitations}.md until wave 6 (then WP18)"
+   ],
+   "depends_on": [
+    "WP0"
+   ],
+   "summary": "The bea-dynamic-analysis skill and its 9 references, rewritten for revision 2: DR-first watches, thread_at and fp.thread_id for game threads, target-scoped anti-cheat, target text treated as data, init_from and callee_exceptions. Also README, SECURITY (threat model incl. the prompt-injection hardening and HTTP exposure notes), THIRD_PARTY notices and docs/decisions.md = §2.",
+   "acceptance": [
+    "bea doctor --skill healthy after bea setup --skill into a temp home",
+    "skill <= 420 lines; every tool name in the skill exists in tools/list",
+    "every recipe is a passing scenario in WP18"
+   ]
+  },
+  {
+   "id": "WP18",
+   "title": "WP18-INT — Integration and release verification · ≈ 5 d (+ integrator role from wave 1)",
+   "owned_paths": [
+    "CHANGELOG.md, scripts/verify-frida-windows.mjs",
+    "tests/acceptance/{lifecycle,investigations,integration}/**",
+    "tests/contracts/catalog-budget.json (measured values)",
+    "docs/{decisions,limitations}.md from wave 6",
+    "Appendix A.3 change requests applied to frozen WP0 files (integrator role, every wave boundary)"
+   ],
+   "depends_on": [
+    "WP0",
+    "WP1",
+    "WP2",
+    "WP3",
+    "WP4",
+    "WP5",
+    "WP6",
+    "WP7",
+    "WP8",
+    "WP9",
+    "WP10",
+    "WP11",
+    "WP12",
+    "WP13",
+    "WP14",
+    "WP15",
+    "WP16",
+    "WP17"
+   ],
+   "summary": "The integrator role from wave 1: batches change requests and evaluates the cut line. At release: full build, all lanes, lifecycle must-haves, the seven investigations as scenario tests (Appendix A.4 inputs; session-creating steps), the cross-wave acceptance rows, catalog budget regeneration, leak audits, verify:frida:windows and verify:emulation receipts, restoring knip to strict, and the release checklist.",
+   "acceptance": [
+    "§10.3 checklist entirely green on this host (all lanes, retry 0, no unnamed skips, leak checks, catalog budget, doctors, HTTP recipe, docs without drift, knip strict, revision regressions, anti-cheat environment recorded, A.3 log reconciled, §11.2 items closed or documented)"
+   ]
+  }
+ ],
+ "open_issues": [
+  "OI-1: the motivating game's anti-cheat status is unverified. With target-scoped signals BEA works on it only if the game shows no AC components, imports or launcher of its own.",
+  "OI-3: MSVC/PDB fixtures are not possible on this host (no MSVC). The SEH-frame thunk was verified against gcc code, kernel32 SEH and g++ C++ EH; MSVC __try and __CxxFrameHandler paths in game code are BELIEVED to behave the same.",
+  "BELIEVED: the leaked native VEH safety net for stray DR/guard traps after an abrupt unload on attached targets. The lab check is in WP9 acceptance (hot DR watch + host taskkill /F leaves the target alive).",
+  "BELIEVED residual of the SEH thunk: a non-leaf frame without unwind info (JIT code, stripped .pdata) between the thunk and a fault can stop the unwind and crash the target. Frida's Interceptor trampolines were crossed successfully in R1.",
+  "BELIEVED: thread_at (running chunks at an onEnter safe point) under real game load (WP11).",
+  "BELIEVED: the knip 6.39 day-0 rule names and ignore semantics in §4.1 (WP0 confirms with npm run knip).",
+  "Anti-cheat module/import/ancestry signal lists may be incomplete for some titles; kernel-only anti-cheat without user-mode files is invisible (WP4; user overrides exist).",
+  "Finding from R1: GumJS 17.23.2 has no Interceptor.ignoreCurrentThread, so oracle-call hook suppression stays the per-listener agentCallTids check.",
+  "Carried over: A5 send/RPC-reply ordering for stream checkpoints (WP1/WP4); A-6 native ring tier correctness (WP7); A-21/L-S6-2 believed API argument layouts (WP8); L6/L-S6-5 drcov round trip (WP9); L-S6-6 realigned PE loads in Ghidra/REA (manual receipt, WP13); L-S6-11 detach after a wedged call on an attached target; S5 [B] items (WP14).",
+  "OI-4 Unicorn license review (user), OI-5 per-client MCP timeout keys (WP15), OI-6 HTTP modern-era envelope routing (WP16), OI-2 Node 22 support (engines stay ^24.11.0).",
+  "CI-M25 not applied: same-name types across agent/emulator/lifecycle modules were not renamed (rationale in Appendix C.3).",
+  "Responses above 10 MiB still require a matching client-side buffer setting (CT-M4, documented)."
+ ]
+}

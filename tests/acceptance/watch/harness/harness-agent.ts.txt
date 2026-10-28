@@ -1,0 +1,237 @@
+// WP9 raw-Frida harness agent (staged as agent/harness.ts and compiled by frida.Compiler; NOT part of the BEA agent).
+// It drives WP9's real engines (hwbp/pageguard/poll/safety net/Stalker) through a minimal WatchCoreSeam: its own
+// single exception handler routing BEA traps, an instrument registry with lifetimes and the stop protocol, and
+// streams that send() rows to the test host. This lets WP9 verify the engines on the real target before the WP3
+// core lands; the production binding is watch.ts seamFromCore().
+import type { AgentError, EndReason, InstrumentId, TraceStartParams, WatchInstallParams } from "../shared/agentProtocol.js";
+import { AGENT_LIMIT_DEFAULTS } from "../shared/agentLimits.js";
+import { LocalGuardPages } from "./pageguard.js";
+import * as trace from "./trace.js";
+import {
+  bindEngines,
+  debugRegisterStateOn,
+  watchInstallOn,
+  type InstrumentHandle,
+  type InstrumentSpec,
+  type RevertOutcome,
+  type TrapRouter,
+  type WatchCoreSeam,
+} from "./watch.js";
+
+const t0 = Date.now();
+let g = 0;
+let traps = 0;
+let attached = false;
+/** rpc.exports.dispose runs the engines' synchronous disarms like WP3's core does on unload (also on a host kill);
+ *  configure({ dispose: false }) models an agent that never got to run them (the worst case for stray traps). */
+let disposeOnUnload = true;
+const disposers: (() => void)[] = [];
+const routers: TrapRouter[] = [];
+const pages = new LocalGuardPages(() => 64);
+const nowUs = (): number => (Date.now() - t0) * 1000;
+
+Process.setExceptionHandler((d) => {
+  const tid = Process.getCurrentThreadId();
+  if (d.type === "single-step") {
+    let ours = false;
+    for (const r of routers) if (r.onSingleStep?.(d, tid) === true) ours = true;
+    if (ours) traps++;
+    else {
+      // diagnostics: a single step nobody claimed is about to kill the target; say what it was before it does
+      const nc = d.nativeContext;
+      send({
+        type: "unclaimed",
+        tid,
+        pc: d.address.toString(),
+        dr6: nc.add(0x68).readU64().toString(16),
+        dr7: nc.add(0x70).readU64().toString(16),
+        eflags: nc.add(0x44).readU32().toString(16),
+        flags: nc.add(0x30).readU32().toString(16),
+        slots: (() => {
+          try {
+            return engines.hw.slotInfo().map((s) => `${String(s.slot)}:${String(s.owner)}`).join(",");
+          } catch {
+            return "?";
+          }
+        })(),
+      });
+      Thread.sleep(0.3);
+    }
+    return ours;
+  }
+  if (d.type === "guard-page" && d.memory !== undefined) {
+    const page = pages.find(d.memory.address);
+    if (page === null) return false;
+    pages.noteConsumed(page);
+    traps++;
+    for (const r of routers) if (r.onGuardPage?.(d, tid, page) === true) return true;
+    return true; // our page, no engine claimed it: the OS already removed the guard, re-execute unguarded
+  }
+  return false;
+});
+
+interface ShimInstrument {
+  readonly id: InstrumentId;
+  readonly spec: InstrumentSpec;
+  active: boolean;
+  ended: boolean;
+  hits: number;
+  rows: unknown[];
+  timer: ReturnType<typeof setTimeout> | null;
+  counters: { filtered: number; errors: number };
+  stopping: Promise<unknown> | null;
+}
+const instruments = new Map<InstrumentId, ShimInstrument>();
+let nextId = 1;
+
+const flush = (inst: ShimInstrument): void => {
+  if (inst.rows.length === 0) return;
+  send({ type: "rows", id: inst.id, rows: inst.rows.splice(0) });
+};
+setInterval(() => {
+  for (const inst of instruments.values()) flush(inst);
+}, 50);
+
+const stop = (inst: ShimInstrument, reason: EndReason): Promise<unknown> => {
+  inst.stopping ??= (async () => {
+    inst.active = false;
+    if (inst.timer !== null) clearTimeout(inst.timer);
+    let outcome: RevertOutcome;
+    try {
+      outcome = await inst.spec.revert(reason);
+    } catch (e) {
+      outcome = { reverted: false, verification: null, detail: String(e) };
+    }
+    flush(inst);
+    inst.ended = true;
+    const summary = { id: inst.id, reason, outcome, hits: inst.hits, counters: inst.counters, windows: pages.windowsOf(inst.id) };
+    send({ type: "ended", ...summary });
+    return summary;
+  })();
+  return inst.stopping;
+};
+
+const seam: WatchCoreSeam = {
+  attached: () => attached,
+  limits: () => AGENT_LIMIT_DEFAULTS,
+  nowUs,
+  nextG: () => ++g,
+  registerTrapRouter: (router) => {
+    routers.push(router);
+    routers.sort((a, b) => a.order - b.order);
+  },
+  registerDisposer: (dispose) => {
+    disposers.push(dispose);
+  },
+  guardPages: () => pages,
+  fault: (where, e) => send({ type: "fault", where, error: String(e) }),
+  openInstrument: (spec): InstrumentHandle | AgentError => {
+    const n = nextId++;
+    const id = `${spec.kind === "watch" ? "w" : "t"}${String(n)}`;
+    const inst: ShimInstrument = {
+      id,
+      spec,
+      active: true,
+      ended: false,
+      hits: 0,
+      rows: [],
+      timer: null,
+      counters: { filtered: 0, errors: 0 },
+      stopping: null,
+    };
+    inst.timer = setTimeout(() => void stop(inst, "duration"), spec.lifetime.duration_ms);
+    instruments.set(id, inst);
+    return {
+      id,
+      streamId: `s${String(n)}`,
+      isActive: () => inst.active,
+      emitJson: (row) => {
+        inst.rows.push(row);
+      },
+      emitBinary: (records, count) => send({ type: "bin", id, count }, records),
+      hit: () => {
+        if (!inst.active) return false;
+        inst.hits++;
+        if (inst.hits >= spec.lifetime.max_hits) {
+          inst.active = false;
+          setTimeout(() => void stop(inst, "max_hits"), 0);
+        }
+        return true;
+      },
+      count: (counter, k = 1) => {
+        inst.counters[counter] += k;
+      },
+      suspendedWindows: () => pages.windowsOf(id),
+      end: (reason) => {
+        setTimeout(() => void stop(inst, reason), 0);
+      },
+      notice: (code, detail) => send({ type: "notice", code, detail }),
+    };
+  },
+};
+const engines = bindEngines(seam);
+
+// trace.ts reads the same seam (plus a StalkerCoordinator) from core.watchSeam
+const followed = new Set<number>();
+const traceSeam = {
+  ...seam,
+  stalkerCo: () => ({
+    ensureQueue: (capacity?: number, drainMs?: number) => {
+      Stalker.queueCapacity = Math.max(Stalker.queueCapacity, capacity ?? AGENT_LIMIT_DEFAULTS.stalker_queue_capacity);
+      Stalker.queueDrainInterval = Math.min(Stalker.queueDrainInterval, drainMs ?? AGENT_LIMIT_DEFAULTS.stalker_drain_ms);
+      return { capacity: Stalker.queueCapacity, drain_ms: Stalker.queueDrainInterval };
+    },
+    claim: (tid: number, owner: string): AgentError | null => {
+      if (followed.has(tid))
+        return { _tag: "StalkerBusy", message: "followed", thread_id: tid, owner, retry_after_ms: 0 };
+      followed.add(tid);
+      return null;
+    },
+    release: (tid: number) => followed.delete(tid),
+    forget: (tid: number) => followed.delete(tid),
+    invalidateAll: (addresses: readonly NativePointer[]) => {
+      for (const a of addresses) Stalker.invalidate(a);
+    },
+  }),
+};
+trace.init({ jsTid: Process.getCurrentThreadId(), watchSeam: traceSeam } as unknown as Parameters<typeof trace.init>[0]);
+
+const main = Process.mainModule;
+const exportAt = (name: string): NativePointer => main.getExportByName(name);
+
+rpc.exports = {
+  configure: (opts: { attached: boolean; dispose?: boolean }) => {
+    attached = opts.attached;
+    disposeOnUnload = opts.dispose ?? true;
+    return true;
+  },
+  dispose: () => {
+    if (!disposeOnUnload) return;
+    for (const d of disposers.splice(0)) {
+      try {
+        d();
+      } catch {
+        // unload path: never throw out of dispose
+      }
+    }
+  },
+  layout: () => {
+    const world = exportAt("g_world").readPointer();
+    return {
+      base: main.base.toString(),
+      car: world.isNull() ? null : world.add(8).readPointer().toString(),
+      hotSink: exportAt("g_hot_sink").toString(),
+      physicsStep: exportAt("physics_step").toString(),
+    };
+  },
+  readU32: (address: string) => ptr(address).readU32(),
+  watchInstall: (p: WatchInstallParams) => watchInstallOn(engines, p),
+  traceStart: (p: TraceStartParams) => trace.rpc.traceStart(p),
+  debugRegisterState: () => debugRegisterStateOn(engines.hw, {}, 64),
+  stop: async (id: string) => {
+    const inst = instruments.get(id);
+    return inst === undefined ? null : await stop(inst, "requested");
+  },
+  status: () => ({ traps, safetyNet: engines.net.counters(), netInstalled: engines.net.installed }),
+};
+send({ type: "ready" });

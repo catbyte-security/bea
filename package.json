@@ -1,0 +1,95 @@
+{
+  "name": "bea-agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BEA — Binary Execution Analysis: dynamic binary analysis for agents",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/catbyte-security/bea.git"
+  },
+  "homepage": "https://github.com/catbyte-security/bea#readme",
+  "bugs": {
+    "url": "https://github.com/catbyte-security/bea/issues"
+  },
+  "type": "module",
+  "bin": {
+    "bea": "scripts/bea.mjs",
+    "bea-agents": "scripts/bea.mjs"
+  },
+  "engines": {
+    "node": "^24.11.0"
+  },
+  "packageManager": "npm@11.16.0",
+  "files": [
+    "dist/",
+    "scripts/bea.mjs",
+    "bridge/emu/bea_emu_bridge.py",
+    "bridge/emu/requirements.lock",
+    "bridge/emu/README.md",
+    "README.md",
+    "SECURITY.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
+  ],
+  "allowScripts": {
+    "frida@17.23.2": true
+  },
+  "bea": {
+    "skillVersion": "1"
+  },
+  "scripts": {
+    "build": "node scripts/lib/lock.mjs build -- \"node scripts/clean.mjs && npm run build:ts && npm run build:agent && npm run build:native && npm run build:bridge && npm run build:skill\"",
+    "build:ts": "node scripts/lib/lock.mjs build -- tsc -p tsconfig.build.json",
+    "build:agent": "node scripts/build-agent.mjs",
+    "build:native": "node scripts/build-native.mjs",
+    "build:bridge": "node scripts/build-bridge.mjs",
+    "build:skill": "node scripts/build-skill.mjs",
+    "build:fixtures": "node scripts/build-fixtures.mjs",
+    "generate": "node scripts/generate.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:shared": "tsc -p tsconfig.shared.json",
+    "lint": "oxlint && node scripts/verify-module-boundaries.mjs",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "knip": "knip",
+    "check": "node scripts/generate.mjs --check && npm run typecheck && npm run typecheck:shared && npm run lint && npm run format:check && npm run knip && node scripts/verify-test-discovery.mjs",
+    "test": "vitest run --project unit --project mcp-boundary --project cli-boundary --project http-boundary",
+    "test:process": "npm run build && vitest run --project process-boundary",
+    "test:emu": "npm run build && vitest run --project emu-boundary",
+    "test:acceptance": "npm run build && npm run build:fixtures && vitest run --project acceptance",
+    "verify:frida:windows": "npm run build && npm run build:fixtures && node scripts/verify-frida-windows.mjs",
+    "verify:emulation": "npm run build && npm run build:fixtures && node scripts/verify-emulation.mjs",
+    "catalog:golden": "npm run build:ts && node scripts/catalog-golden.mjs",
+    "smoke": "node scripts/smoke-stdio.mjs",
+    "start": "node scripts/bea.mjs mcp",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@toon-format/toon": "4.4.0",
+    "frida": "17.23.2",
+    "jsonc-parser": "3.3.1",
+    "smol-toml": "1.9.1",
+    "yauzl": "3.4.0",
+    "yazl": "3.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "0.5.0",
+    "@types/frida-gum": "19.12.0",
+    "@types/node": "24.19.2",
+    "@vitest/coverage-v8": "5.0.3",
+    "ajv": "8.20.0",
+    "canonicalize": "5.1.0",
+    "fast-check": "4.10.2",
+    "husky": "9.1.7",
+    "knip": "6.39.0",
+    "lint-staged": "16.4.0",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.87.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "import", "unicorn", "oxc"],
+  "rules": {
+    "complexity": ["warn", 20],
+    "max-depth": ["warn", 4],
+    "max-lines": ["warn", { "max": 500, "skipBlankLines": true, "skipComments": true }],
+    "max-lines-per-function": ["warn", { "max": 100, "skipBlankLines": true, "skipComments": true }],
+    "max-params": ["warn", 4],
+    "no-var": "warn",
+    "no-var-requires": "error",
+    "typescript/no-import-type-side-effects": "error",
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "AbortSignal",
+        "property": "any",
+        "message": "Compose signals with composeSignal (src/domain/abort.ts): AbortSignal.any retains listeners on long-lived signals (CT-I2)."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/domain/abort.ts"],
+      "rules": { "no-restricted-properties": "off" }
+    },
+    {
+      "files": ["src/**/*.ts"],
+      "excludeFiles": [
+        "src/providers/process/**",
+        "src/providers/emulator/EmuBridge.ts",
+        "src/providers/emulator/pythonResolver.ts",
+        "src/providers/emulator/venvProvisioner.ts",
+        "src/**/*.test.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "node:child_process",
+                "message": "Only src/providers/process/** and the emulator bridge, resolver and venv provisioner start processes (DESIGN §4.1, CI-I7)."
+              },
+              {
+                "name": "child_process",
+                "message": "Only src/providers/process/** and the emulator bridge, resolver and venv provisioner start processes (DESIGN §4.1, CI-I7)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["tests/**/*.ts", "src/**/*.test.ts", "src/**/*.fixture.ts"],
+      "rules": {
+        "max-lines": "off",
+        "max-lines-per-function": ["error", { "max": 150, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
+      "files": ["src/application/**/*.test.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/server/**", "**/cli/**", "**/main/**"],
+                "message": "Service tests must use application ports rather than CLI or MCP entrypoints."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/agent/**/*.ts", "src/shared/**/*.ts"],
+      "env": { "node": false, "browser": false, "es2022": true }
+    },
+    {
+      "files": ["src/agent/pure/**/*.ts"],
+      "env": { "node": false, "browser": false, "es2022": true },
+      "rules": {
+        "no-restricted-globals": [
+          "error",
+          "Process",
+          "Module",
+          "Memory",
+          "MemoryAccessMonitor",
+          "Interceptor",
+          "Stalker",
+          "Thread",
+          "NativePointer",
+          "NativeFunction",
+          "NativeCallback",
+          "CModule",
+          "ptr",
+          "int64",
+          "uint64",
+          "Int64",
+          "UInt64",
+          "send",
+          "recv",
+          "rpc",
+          "Frida",
+          "Script",
+          "DebugSymbol",
+          "ApiResolver",
+          "Instruction",
+          "X86Writer",
+          "X86Relocator",
+          "hexdump"
+        ]
+      }
+    }
+  ],
+  "env": { "node": true, "es2023": true },
+  "ignorePatterns": ["dist", "build", "node_modules", "coverage", ".cache", "fixtures", "bridge"]
+}

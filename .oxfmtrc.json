@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 120,
+  "sortImports": false,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "dist/**",
+    "build/**",
+    ".cache/**",
+    "coverage/**",
+    "node_modules/**",
+    "CHANGELOG.md",
+    "package-lock.json",
+    "fixtures/golden/**",
+    "docs/design/**",
+    "docs/research/**"
+  ]
+}

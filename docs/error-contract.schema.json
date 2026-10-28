@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_request",
+            "configuration_invalid",
+            "session_not_found",
+            "reference_not_found",
+            "invalid_state",
+            "target_exited",
+            "instance_mismatch",
+            "address_unmapped",
+            "memory_access_failed",
+            "instrumentation_failed",
+            "effect_unreverted",
+            "access_denied",
+            "unsupported_target",
+            "capability_unavailable",
+            "provider_timeout",
+            "cancelled",
+            "resource_constraint",
+            "evidence_integrity_mismatch",
+            "revision_conflict",
+            "file_operation_failed",
+            "cleanup_incomplete",
+            "execution_failure"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "invalid_input",
+            "target_state",
+            "unsupported",
+            "unavailable",
+            "timeout",
+            "cancelled",
+            "resource_constraint",
+            "integrity_mismatch",
+            "execution_failure"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "remediation": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            }
+          },
+          "required": ["action"],
+          "additionalProperties": false
+        },
+        "recovery": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "inspect_input_contract"
+                },
+                "operation": {
+                  "type": "string"
+                }
+              },
+              "required": ["kind", "operation"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "inspect_timeout_state"
+                },
+                "operation": {
+                  "type": "string"
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 3600000
+                }
+              },
+              "required": ["kind", "operation", "timeout_ms"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "reattach"
+                },
+                "previous_instance_id": {
+                  "type": "string"
+                }
+              },
+              "required": ["kind", "previous_instance_id"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "refresh_module_map"
+                },
+                "instance_id": {
+                  "type": ["string", "null"]
+                }
+              },
+              "required": ["kind", "instance_id"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "revert_effects"
+                },
+                "effect_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": ["kind", "effect_ids"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "details": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": ["code", "category", "message", "retryable", "remediation", "details"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["error"],
+  "additionalProperties": false,
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

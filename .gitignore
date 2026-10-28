@@ -1,0 +1,24 @@
+# Build outputs (never committed; DESIGN §3 [build])
+dist/
+build/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Fixture outputs if a fixture is ever compiled next to its source by hand
+fixtures/**/*.exe
+fixtures/**/*.dll
+fixtures/**/*.o
+fixtures/**/*.obj
+fixtures/**/*.pdb
+
+# Python bytecode (emulator bridge)
+__pycache__/
+*.pyc
+
+# Logs and editor state
+*.log
+.DS_Store
