@@ -16,12 +16,18 @@ export interface ThreadObserverSubscriber {
   readonly onRemoved?: (thread: StableThreadDetails) => void;
 }
 
+/** Longest thread description read (UTF-16 code units); the host clips list_threads names further. */
+const THREAD_NAME_MAX_CHARS = 256;
+
 export class ThreadService {
   readonly #core: AgentCore;
   readonly #subscribers = new Set<ThreadObserverSubscriber>();
   #observer: ThreadObserver | null = null;
   #ctx: NativePointer | null = null;
   #info: NativePointer | null = null;
+  #nameOut: NativePointer | null = null;
+  /** GetThreadDescription is exported (Windows 10 1607+); looked up once, not once per thread */
+  #describes: boolean | null = null;
 
   constructor(core: AgentCore) {
     this.#core = core;
@@ -97,19 +103,26 @@ export class ThreadService {
     return bytes === null ? null : parseContext(bytes);
   }
 
-  /** GetThreadDescription (optional; null when absent or empty). */
+  /**
+   * The thread's description (SetThreadDescription; what list_threads reports as `name`), null when it has none or
+   * cannot be read. GetThreadDescription needs THREAD_QUERY_LIMITED_INFORMATION and returns an HRESULT plus a
+   * LocalAlloc'd, NUL-terminated UTF-16 string that the caller frees with LocalFree (also when it is empty).
+   */
   name(tid: ThreadId): string | null {
     const win = this.#core.win;
-    if (win.address("kernelbase.dll", "GetThreadDescription") === null) return null;
+    this.#describes ??= win.address("kernelbase.dll", "GetThreadDescription") !== null;
+    if (!this.#describes) return null;
     const h = win.OpenThread(THREAD_ACCESS.queryLimited, 0, tid);
     if (h.isNull()) return null;
-    const out = Memory.alloc(8);
+    this.#nameOut ??= Memory.alloc(Process.pointerSize);
+    const out = this.#nameOut;
     try {
+      out.writePointer(NULL);
       if (win.GetThreadDescription(h, out) < 0) return null;
       const p = out.readPointer();
       if (p.isNull()) return null;
       try {
-        const s = p.readUtf16String(256);
+        const s = p.readUtf16String(THREAD_NAME_MAX_CHARS);
         return s === null || s === "" ? null : s;
       } finally {
         win.LocalFree(p);

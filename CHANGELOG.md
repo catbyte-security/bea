@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### Fixed (dogfooding on Chrome's GPU process, BEA-FEEDBACK 2026-10-28)
+
+- **PE reader:** functions that share a linker-folded `UNWIND_INFO` blob are no longer reported as fragments of
+  the first function that used it. Before the fix, 98% of `chrome.dll`'s functions were affected. `hook_function`,
+  `override_function` and `trace_execution {on_call}` refused real function starts as "not a function start", and
+  `func` / `function_start` in `map_address`, crash frames, `list_threads` and coverage summaries named the wrong
+  function. Only chained and indirect unwind links are cached now.
+- **No deadlock on ASan targets:**
+  - Crash backtraces come from ntdll's unwinder (`RtlLookupFunctionEntry` + `RtlVirtualUnwind`) on a private copy
+    of the exception context instead of dbghelp, so nothing allocates through the target's CRT.
+  - Blocking first-chance reports are opt-in (`crash.first_chance_blocking`, `BEA_CRASH_FIRST_CHANCE_BLOCKING`).
+  - First-chance exceptions in ASan's runtime, in ASan's shadow memory or in `crash.passthrough_modules` pass through
+    without reporting work.
+  - Last-chance reports list only the faulting frames.
+- **Code Integrity Guard and Arbitrary Code Guard:**
+  - `attach_process` refuses processes that enforce either one before injecting (`access_denied`, reason
+    `code-integrity-guard` / `arbitrary-code-guard`).
+  - `bea-jobhost inspect` reports the target's mitigation policies, and attach evidence records them. A process
+    that enforces user-mode shadow stacks gets the `USER_SHADOW_STACKS` limitation.
+- **Failure details:**
+  - A failed spawn, attach or resume carries Frida's own message in `details.diagnostics.frida_message`, sanitized
+    and at most 300 characters.
+  - An injection that ended the target is reported as `target_exited` with its exit status.
+- **Attach deadline:** it is configurable (`limits.attach_timeout_ms`, `BEA_ATTACH_TIMEOUT_MS`, 1–110 s), and a
+  timeout names the setting. `spawn_process` and `attach_process` deadlines are 120 s, and `bea_status` reports the
+  attach deadline and the crash policy.
+- **Thread names:** `list_threads` reports them (`SetThreadDescription`).
+- **`trace_execution` thread mode on busy processes:** a traced thread that is blocked in a system call is followed
+  from its next entry into that stub, through a hook on the stub. Before, every wait of every thread passed through a
+  JavaScript callback and the agent's lock for the whole trace, which wedged Chrome's GPU process. The hook is now
+  native, so other threads never enter JavaScript, and it is removed as soon as the thread is followed. A thread
+  sampled inside `NtAllocateVirtualMemory` is refused (`invalid_state`; retry). The `modules` description now says
+  that indirect calls into other modules are still followed.
+- **New test fixtures:** `vehcommit.exe` (an ASan-like commit-on-demand allocator), `waiters.exe` (a busy wait stub
+  plus a parked thread) and `mitigated.exe` (self-enabled CIG/ACG and named threads).
+
 ## 0.1.0 (unreleased; release candidate 2026-10-28)
 
 First integrated version, built in waves by work packages WP0–WP17 and integrated by WP18

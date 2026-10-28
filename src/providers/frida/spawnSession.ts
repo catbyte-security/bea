@@ -22,6 +22,7 @@ import { withTempDir } from "./fridaTemp.js";
 import { createNativeCancel } from "./NativeCancel.js";
 import { BoundedOutputCapture } from "./outputCapture.js";
 import type { PeHeaderFacts } from "./peHeader.js";
+import { withFridaMessage } from "./rpcErrors.js";
 import { HOST_OUTPUT_STREAM, type SessionRecord } from "./SessionRecord.js";
 import { buildTargetEnvironment, type EnvMode, type TargetEnvironment } from "./spawnEnv.js";
 import {
@@ -335,7 +336,8 @@ export const runSpawn = async (
     killWhenSpawned(spawnPromise, device, (pid) => deps.logger.info("late spawn killed", { pid }));
     return err({ _tag: "ProviderTimeout", operation, timeout_ms: deps.limits.startup.spawnGuardMs, phase: "spawn" });
   }
-  if (spawned.kind === "error") return err(spawnFailure(operation, spawned.cause, pre.program));
+  if (spawned.kind === "error")
+    return err(withFridaMessage(spawnFailure(operation, spawned.cause, pre.program), spawned.cause, pre.literals));
   const pid = spawned.value;
   record.pid = pid;
   clock.mark("spawn");
@@ -411,7 +413,7 @@ export const runSpawn = async (
   clock.mark("metadata");
 
   // step 7: attach
-  const session = await attachDevice(deps, device, pid, op);
+  const session = await attachDevice(deps, device, pid, op, pre.literals);
   if (!session.ok) return fail(session.error);
   clock.mark("attach");
 
@@ -613,19 +615,30 @@ const attachDevice = async (
   device: FridaDeviceLike,
   pid: number,
   op: OperationContext,
+  literals: SensitiveLiterals | null,
 ): Promise<Result<FridaSessionLike, BeaError>> => {
   const cancel = createNativeCancel(deps.createCancellable(), {
     deadline: op.deadline.min(deps.limits.startup.attachMs),
     signal: op.signal,
   });
+  let cause: unknown;
   try {
     // LIFE-3: the injection that extracts Frida's agent runs with TEMP at BEA's own (swept) directory
-    return await withTempDir(deps.fridaTempDir?.() ?? null, () =>
-      fridaStep(() => device.attach(pid, cancel.token), deps, op, "attach", {
-        cancel,
-        ms: deps.limits.startup.attachMs,
-      }),
+    const result = await withTempDir(deps.fridaTempDir?.() ?? null, () =>
+      fridaStep(
+        () =>
+          device.attach(pid, cancel.token).catch((rejection: unknown) => {
+            cause = rejection;
+            throw rejection;
+          }),
+        deps,
+        op,
+        "attach",
+        { cancel, ms: deps.limits.startup.attachMs },
+      ),
     );
+    // BEA-FEEDBACK 1c: keep Frida's own rejection text (host-side step only; agent text never enters diagnostics)
+    return result.ok || cause === undefined ? result : err(withFridaMessage(result.error, cause, literals));
   } finally {
     cancel.dispose();
   }

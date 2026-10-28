@@ -2,7 +2,7 @@ import type { Readable, Writable } from "node:stream";
 
 import type { Deadline } from "../domain/deadline.js";
 import type { BeaError } from "../domain/errors/beaError.js";
-import type { JobHostEvent } from "../domain/jobhostProtocol.js";
+import type { JobHostEvent, ProcessMitigations } from "../domain/jobhostProtocol.js";
 import type { Result } from "../domain/result.js";
 
 /**
@@ -124,6 +124,8 @@ export interface ProcessInspection {
   readonly elevated: boolean | null;
   readonly integrityRid: number | null;
   readonly sameUser: boolean | null;
+  /** Mitigation policies (CIG, ACG, CET, image load); null or absent: not read (Linux, an older helper, fakes). */
+  readonly mitigations?: ProcessMitigations | null;
 }
 export interface JobHostProbe {
   readonly ok: boolean;

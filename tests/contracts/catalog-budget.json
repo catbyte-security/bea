@@ -19,12 +19,12 @@
   },
   "measured": {
     "tools": 37,
-    "model_visible_bytes": 82916,
-    "wire_bytes": 292527,
-    "input_bytes": 61255,
-    "output_bytes": 205518,
-    "description_chars": 14841
+    "model_visible_bytes": 83012,
+    "wire_bytes": 293193,
+    "input_bytes": 61307,
+    "output_bytes": 206088,
+    "description_chars": 14885
   },
   "drift_tolerance": 0.02,
-  "catalog_sha256": "c20c9ec609632c2d05d067867b922e94a9eff83eec4d46787944d6ff5a898386"
+  "catalog_sha256": "4ea54f742aede79ee0940251d6f6f3d5800faa28ad430cd3f70954c8f116cfdf"
 }

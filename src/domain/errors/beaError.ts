@@ -168,7 +168,11 @@ export type BeaError =
         | "bea-process-tree"
         | "anti-cheat-detected"
         | "policy"
-        | "os-denied";
+        | "os-denied"
+        /** the process enforces Code Integrity Guard: the unsigned agent DLL cannot load (BEA-FEEDBACK item 1) */
+        | "code-integrity-guard"
+        /** the process enforces Arbitrary Code Guard: injecting the agent would crash it (BEA-FEEDBACK item 1) */
+        | "arbitrary-code-guard";
     })
   | (BeaErrorBase<"UnsupportedTarget"> & {
       readonly reason:

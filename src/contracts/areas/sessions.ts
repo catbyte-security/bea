@@ -74,6 +74,24 @@ const startupOutput = recordedOutput({
     .nullable(),
 });
 
+/**
+ * bea_status: the S1 seed shape (schemas/status.ts) plus what this area configures (BEA-FEEDBACK #3, #4): the attach
+ * deadline in `limits` and the agent's crash policy.
+ */
+const statusLimitsSchema = statusOutputSchema.shape.limits.extend({
+  /** limits.attach_timeout_ms / BEA_ATTACH_TIMEOUT_MS: the Frida attach step of spawn_process and attach_process */
+  attach_timeout_ms: z.number().int(),
+});
+const crashStatusSchema = z.strictObject({
+  /** blocking crash reports at first chance (opt-in); last-chance reports are always on */
+  first_chance_blocking: z.boolean(),
+  source: z.enum(["default", "config-file", "env"]),
+  env: z.string(),
+  /** crash.passthrough_modules (config file); ASan's runtime and shadow faults always pass through */
+  passthrough_modules: z.array(z.string().max(128)).max(32),
+});
+const beaStatusOutputSchema = statusOutputSchema.extend({ limits: statusLimitsSchema, crash: crashStatusSchema });
+
 const effectRowSchema = z.strictObject({
   effect: fxIdSchema,
   kind: z.enum(EFFECT_KINDS),
@@ -91,7 +109,7 @@ export const SESSION_TOOLS = [
     description:
       "Report BEA's own state without touching any target: server version and run id, which opt-in gates are enabled and how to enable them, fixed limits and quotas, backend availability (Frida binding and local device, jobhost, emulator bridge), and open sessions with their active instruments and effects. Call it first when a tool is unavailable.",
     inputSchema: z.strictObject({}),
-    outputSchema: statusOutputSchema,
+    outputSchema: beaStatusOutputSchema,
     effects: fx(),
     cli: { tier: "oneshot", command: "status", positional: [] },
     maxBlockingMs: 10_000,
@@ -170,7 +188,8 @@ export const SESSION_TOOLS = [
     cli: { tier: "scenario-target", reason: SCENARIO_TARGET_REASON },
     evidence: { predicate: "bea.process.instance", recorded: "always", identityExclude: ["env"] },
     errors: ["unsupported_target", "access_denied", "instance_mismatch", "file_operation_failed", "cleanup_incomplete"],
-    maxBlockingMs: 60_000,
+    // the attach step alone may take limits.attach_timeout_ms (up to 110 s, BEA-FEEDBACK #3)
+    maxBlockingMs: 120_000,
     examples: [
       { title: "Spawn a game paused", input: { program: "C:\\Games\\game_sim.exe" } },
       {
@@ -205,7 +224,8 @@ export const SESSION_TOOLS = [
     cli: { tier: "scenario-target", reason: SCENARIO_TARGET_REASON },
     evidence: { predicate: "bea.process.instance", recorded: "always" },
     errors: ["unsupported_target", "access_denied", "instance_mismatch", "target_exited"],
-    maxBlockingMs: 60_000,
+    // the attach step alone may take limits.attach_timeout_ms (up to 110 s, BEA-FEEDBACK #3)
+    maxBlockingMs: 120_000,
     examples: [
       { title: "Attach by pid", input: { pid: 1234 } },
       { title: "Attach by image name", input: { name: "game_sim.exe" } },

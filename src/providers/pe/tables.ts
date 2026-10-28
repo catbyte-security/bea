@@ -238,7 +238,10 @@ export const parsePdata = (view: ImageView): Parsed<PdataTable> =>
     let indirect = 0;
     let deepChains = 0;
     const primary = new Uint32Array(n);
-    // memo: unwind-info rva → primary begin
+    // memo: unwind-info rva → primary begin, for chained and indirect links only. Their content names the parent, so
+    // every entry that reaches them shares the answer. A terminal (non-chained) blob is never cached: linkers fold
+    // byte-identical UNWIND_INFO, so many unrelated functions point at one terminal blob, and each of them is its own
+    // primary when it reaches that blob directly.
     const memo = new Map<number, number>();
     const primaryOf = (b: number, u: number): number => {
       let curBegin = b;
@@ -261,7 +264,7 @@ export const parsePdata = (view: ImageView): Parsed<PdataTable> =>
         const head = view.u32(curUnwind);
         const flags = (head & 0xff) >>> 3;
         if ((flags & 4) === 0) {
-          for (const s of seen) memo.set(s, curBegin);
+          for (const s of seen.slice(0, -1)) memo.set(s, curBegin);
           return curBegin;
         }
         const count = (head >>> 16) & 0xff;

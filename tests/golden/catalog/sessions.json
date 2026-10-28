@@ -33,7 +33,7 @@
       "max_input_bytes": 1048576,
       "examples": 1,
       "input_schema_bytes": 119,
-      "output_schema_bytes": 7038,
+      "output_schema_bytes": 7532,
       "model_visible_bytes": 639,
       "input_depth": 1,
       "output_depth": 9,
@@ -43,7 +43,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false
       },
-      "output_schema_sha256": "1e5e147b68bfd0e3f0fd3416236ecc75a056f32b2c97616a34d0e4be4e64d6ea"
+      "output_schema_sha256": "74ac7691f0a02d3c3333a534d599759e913b38b6556f2100d4f5c452f18297d4"
     },
     {
       "name": "list_processes",
@@ -136,7 +136,7 @@
         "cleanup_incomplete"
       ],
       "returns_target_content": true,
-      "max_blocking_ms": 60000,
+      "max_blocking_ms": 120000,
       "max_input_bytes": 1048576,
       "examples": 2,
       "input_schema_bytes": 1230,
@@ -231,7 +231,7 @@
       },
       "errors": ["unsupported_target", "access_denied", "instance_mismatch", "target_exited"],
       "returns_target_content": true,
-      "max_blocking_ms": 60000,
+      "max_blocking_ms": 120000,
       "max_input_bytes": 1048576,
       "examples": 2,
       "input_schema_bytes": 665,

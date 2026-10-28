@@ -11,6 +11,21 @@ const jobPolicy = z.strictObject({
   breakawayAllowed: z.literal(false),
   memLimitBytes: z.number().int().positive().nullable(),
 });
+/** One GetProcessMitigationPolicy read: the policy's DWORD of flags, or null with the Win32 error when the read failed. */
+const mitigationRead = z.strictObject({ flags: u32.nullable(), win32: u32 });
+/**
+ * `inspect.mitigations` (BEA-FEEDBACK item 1; protocol 1, additive): raw flags of the four policies the helper reads.
+ * `access`: the inspect handle (PROCESS_QUERY_LIMITED_INFORMATION) or a second PROCESS_QUERY_INFORMATION handle opened
+ * because the first was refused. Optional on the wire so a helper built before the field still parses (unknown).
+ */
+const mitigationsWire = z.strictObject({
+  access: z.enum(["limited", "query"]),
+  signature: mitigationRead,
+  dynamicCode: mitigationRead,
+  userShadowStack: mitigationRead,
+  imageLoad: mitigationRead,
+});
+export type MitigationsWire = z.infer<typeof mitigationsWire>;
 const inspectFields = {
   pid: u32,
   access: z.enum(["limited", "limited+synchronize"]),
@@ -30,6 +45,7 @@ const inspectFields = {
   elevated: z.boolean().nullable(),
   integrityRid: u32.nullable(),
   sameUser: z.boolean().nullable(),
+  mitigations: mitigationsWire.optional(),
 };
 export const jobHostErrorStage = z.enum([
   "usage",
@@ -131,3 +147,63 @@ export const jobHostEventSchema = z.discriminatedUnion("event", [
   }),
 ]);
 export type JobHostEvent = z.infer<typeof jobHostEventSchema>;
+
+// ------------------------------------------------- decoded `inspect.mitigations` (ProcessInspection.mitigations)
+// Bit layouts are the Windows SDK's (winnt.h PROCESS_MITIGATION_*_POLICY); `flags` keeps the raw DWORD, so bits this
+// release does not name stay visible. Decoded by src/providers/process/ProcessInspector.ts.
+
+/** ProcessSignaturePolicy (Code Integrity Guard): which signers an image needs to load. */
+export interface SignaturePolicy {
+  readonly flags: number;
+  readonly microsoftSignedOnly: boolean;
+  readonly storeSignedOnly: boolean;
+  /** set alongside MicrosoftSignedOnly by a runtime opt-in; alone it does not block unsigned images (lab) */
+  readonly mitigationOptIn: boolean;
+  readonly auditMicrosoftSignedOnly: boolean;
+  readonly auditStoreSignedOnly: boolean;
+}
+/** ProcessDynamicCodePolicy (Arbitrary Code Guard): no new executable memory, no changes to code pages. */
+export interface DynamicCodePolicy {
+  readonly flags: number;
+  readonly prohibitDynamicCode: boolean;
+  readonly allowThreadOptOut: boolean;
+  readonly allowRemoteDowngrade: boolean;
+  readonly auditProhibitDynamicCode: boolean;
+}
+/** ProcessUserShadowStackPolicy (hardware-enforced stack protection, CET). */
+export interface UserShadowStackPolicy {
+  readonly flags: number;
+  readonly enableUserShadowStack: boolean;
+  readonly auditUserShadowStack: boolean;
+  readonly setContextIpValidation: boolean;
+  readonly auditSetContextIpValidation: boolean;
+  readonly enableUserShadowStackStrictMode: boolean;
+  readonly blockNonCetBinaries: boolean;
+  readonly blockNonCetBinariesNonEhcont: boolean;
+  readonly auditBlockNonCetBinaries: boolean;
+  readonly cetDynamicApisOutOfProcOnly: boolean;
+  readonly setContextIpValidationRelaxedMode: boolean;
+}
+/** ProcessImageLoadPolicy: where images may load from. */
+export interface ImageLoadPolicy {
+  readonly flags: number;
+  readonly noRemoteImages: boolean;
+  readonly noLowMandatoryLabelImages: boolean;
+  readonly preferSystem32Images: boolean;
+  readonly auditNoRemoteImages: boolean;
+  readonly auditNoLowMandatoryLabelImages: boolean;
+}
+export type MitigationPolicyName = keyof Omit<MitigationsWire, "access">;
+/**
+ * The target's mitigation policies as read by `bea-jobhost inspect`. A policy that could not be read is null (unknown,
+ * never guessed) and listed in `unreadable` with GetLastError (for example ERROR_INVALID_PARAMETER for a policy the
+ * Windows build does not know).
+ */
+export interface ProcessMitigations {
+  readonly access: MitigationsWire["access"];
+  readonly signature: SignaturePolicy | null;
+  readonly dynamicCode: DynamicCodePolicy | null;
+  readonly userShadowStack: UserShadowStackPolicy | null;
+  readonly imageLoad: ImageLoadPolicy | null;
+  readonly unreadable: readonly { readonly policy: MitigationPolicyName; readonly win32: number }[];
+}

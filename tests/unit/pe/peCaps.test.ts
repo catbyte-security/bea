@@ -139,6 +139,53 @@ describe("PE reader aggregate caps (DATA-1)", () => {
   });
 });
 
+describe(".pdata with folded unwind info", () => {
+  it("keeps functions that share one terminal UNWIND_INFO blob as separate primaries", async () => {
+    // .rdata: U0 = terminal blob (version 1, flags 0, no codes); UC = chained blob whose parent is 0x3000.
+    const rdata = Buffer.alloc(0x40);
+    const U0 = 0x1000;
+    const UC = 0x1010;
+    rdata.writeUInt32LE(0x0000_0001, 0x00);
+    rdata.writeUInt32LE(0x0000_0021, 0x10); // version 1 | UNW_FLAG_CHAININFO << 3, count 0
+    rdata.writeUInt32LE(0x3000, 0x14); // chained RUNTIME_FUNCTION: begin, end, unwind
+    rdata.writeUInt32LE(0x3010, 0x18);
+    rdata.writeUInt32LE(U0, 0x1c);
+    // .pdata: A, B (folded blob), A's chained fragment, C (folded blob again, after the chain was cached)
+    const rows: readonly (readonly [number, number, number])[] = [
+      [0x3000, 0x3010, U0],
+      [0x3010, 0x3020, U0],
+      [0x3020, 0x3030, UC],
+      [0x3030, 0x3040, U0],
+    ];
+    const pdata = Buffer.alloc(rows.length * 12);
+    rows.forEach(([b, e, u], i) => {
+      pdata.writeUInt32LE(b, i * 12);
+      pdata.writeUInt32LE(e, i * 12 + 4);
+      pdata.writeUInt32LE(u, i * 12 + 8);
+    });
+    const bytes = buildPe(
+      [
+        { name: ".rdata", rva: 0x1000, data: rdata },
+        { name: ".pdata", rva: 0x2000, data: pdata },
+        { name: ".text", rva: 0x3000, data: Buffer.alloc(0x40, 0xc3) },
+      ],
+      { 3: [0x2000, pdata.length] },
+    );
+    const { image } = await openPe("pdata-folded.dll", bytes);
+    const table = await image.functions();
+    expect([...table.entries()].map((e) => [e.begin, e.primary_begin])).toEqual([
+      [0x3000, 0x3000],
+      [0x3010, 0x3010],
+      [0x3020, 0x3000],
+      [0x3030, 0x3030],
+    ]);
+    expect(table.chained).toBe(1);
+    expect(table.lookup(0x3010)).toMatchObject({ begin: 0x3010, primary_begin: 0x3010, fragment: false });
+    expect(table.lookup(0x3034)).toMatchObject({ begin: 0x3030, primary_begin: 0x3030, fragment: false });
+    expect(table.lookup(0x3024)).toMatchObject({ begin: 0x3020, primary_begin: 0x3000, fragment: true });
+  });
+});
+
 describe("section headers (DATA-8)", () => {
   it("an empty section whose PointerToRawData is past EOF has no raw data and no issue", async () => {
     const bytes = buildPe(

@@ -188,9 +188,9 @@
       "max_blocking_ms": 90000,
       "max_input_bytes": 1048576,
       "examples": 2,
-      "input_schema_bytes": 1342,
+      "input_schema_bytes": 1394,
       "output_schema_bytes": 3711,
-      "model_visible_bytes": 1929,
+      "model_visible_bytes": 1981,
       "input_depth": 4,
       "output_depth": 8,
       "input_schema": {
@@ -231,7 +231,7 @@
           },
           "modules": {
             "default": ["$main"],
-            "description": "Recorded modules; others are Stalker-excluded.",
+            "description": "Recorded modules. Direct calls into other modules run natively; indirect calls are still followed.",
             "minItems": 1,
             "maxItems": 16,
             "type": "array",

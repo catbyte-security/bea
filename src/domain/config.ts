@@ -58,10 +58,17 @@ const QUOTA_BOUNDS = {
   blobMb: { min: 16, max: 1_048_576 },
 } as const;
 
+/**
+ * The Frida attach step's deadline (spawn and attach; BEA-FEEDBACK #3): limits.attach_timeout_ms /
+ * BEA_ATTACH_TIMEOUT_MS. The upper bound leaves the rest of a 120 s startup call to the agent's own steps.
+ */
+export const ATTACH_TIMEOUT_MS = { min: 1000, max: 110_000, default: 10_000 } as const;
+
 /** S3 §3 host limits and S5 §13 emulator settings that are configurable (everything else is fixed). */
 const LIMIT_BOUNDS = {
   maxLiveSessions: { min: 1, max: 8 },
   rpcDefaultTimeoutMs: { min: 1000, max: 115_000 },
+  attachTimeoutMs: { min: ATTACH_TIMEOUT_MS.min, max: ATTACH_TIMEOUT_MS.max },
   emuMaxSessions: { min: 1, max: 16 },
   emuMemoryLimitMb: { min: 256, max: 65_536 },
   emuSnapshotBytesLimitMb: { min: 16, max: 8192 },
@@ -93,6 +100,18 @@ export interface BeaConfig {
   readonly limits: {
     readonly maxLiveSessions: Setting<number>;
     readonly rpcDefaultTimeoutMs: Setting<number>;
+    /** ATTACH_TIMEOUT_MS: the Frida attach step of spawn_process and attach_process */
+    readonly attachTimeoutMs: Setting<number>;
+  };
+  /** The agent's crash policy (BEA-FEEDBACK #4); sent in every session's hello */
+  readonly crash: {
+    /**
+     * Blocking crash reports at FIRST chance (default false). They run on the faulting thread, which may hold the
+     * target's locks (ASan, JITs, drivers that probe memory under SEH); last-chance reports are always on.
+     */
+    readonly firstChanceBlocking: Setting<boolean>;
+    /** module file-name patterns (`*` wildcard) whose first-chance exceptions pass through; config file only */
+    readonly passthroughModules: Setting<readonly string[]>;
   };
   readonly attach: {
     /** S3 rule 7 */
@@ -151,6 +170,8 @@ export const KNOWN_ENV = [
   "BEA_BLOB_QUOTA_MB",
   "BEA_MAX_LIVE_SESSIONS",
   "BEA_RPC_TIMEOUT_MS",
+  "BEA_ATTACH_TIMEOUT_MS",
+  "BEA_CRASH_FIRST_CHANCE_BLOCKING",
   "BEA_ALLOW_ANTI_CHEAT",
   "BEA_EMU_MAX_SESSIONS",
   "BEA_EMU_MEMORY_LIMIT_MB",
@@ -166,6 +187,19 @@ export const KNOWN_ENV = [
 const boundedBytes = (bounds: { readonly min: number; readonly max: number }) =>
   z.number().int().min(bounds.min).max(bounds.max);
 const boundedInt = boundedBytes;
+
+/** crash.passthrough_modules: at most 32 patterns (the agent's CrashPolicy bounds, src/agent/pure/coreCrash.ts). */
+const PASSTHROUGH_MODULES_MAX = 32;
+/**
+ * A module file name, `*` matching any run of characters (case-insensitive): 1..128 characters, no path separators,
+ * drive colons or control characters, and more than wildcards.
+ */
+const passthroughPatternSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[^\\/:\p{Cc}]+$/u, "a module file name, optionally with * wildcards (no path, no control characters)")
+  .refine((p) => p.split("*").join("").trim() !== "", "a pattern must name more than wildcards");
 
 /** BEA_HOME/config.json. Unknown keys are errors so typos never silently do nothing. */
 export const configFileSchema = z.strictObject({
@@ -192,6 +226,13 @@ export const configFileSchema = z.strictObject({
     .strictObject({
       max_live_sessions: boundedInt(LIMIT_BOUNDS.maxLiveSessions).optional(),
       rpc_default_timeout_ms: boundedInt(LIMIT_BOUNDS.rpcDefaultTimeoutMs).optional(),
+      attach_timeout_ms: boundedInt(LIMIT_BOUNDS.attachTimeoutMs).optional(),
+    })
+    .optional(),
+  crash: z
+    .strictObject({
+      first_chance_blocking: z.boolean().optional(),
+      passthrough_modules: z.array(passthroughPatternSchema).max(PASSTHROUGH_MODULES_MAX).optional(),
     })
     .optional(),
   attach: z
@@ -465,6 +506,19 @@ export const loadConfig = async (
         file?.limits?.rpc_default_timeout_ms,
         10_000,
       ),
+      attachTimeoutMs: pick(
+        envInt(env, "BEA_ATTACH_TIMEOUT_MS", LIMIT_BOUNDS.attachTimeoutMs, issues, " ms"),
+        file?.limits?.attach_timeout_ms,
+        ATTACH_TIMEOUT_MS.default,
+      ),
+    },
+    crash: {
+      firstChanceBlocking: pick(
+        envBoolean(env, "BEA_CRASH_FIRST_CHANCE_BLOCKING", issues),
+        file?.crash?.first_chance_blocking,
+        false,
+      ),
+      passthroughModules: pick<readonly string[]>(undefined, file?.crash?.passthrough_modules, []),
     },
     attach: {
       allowSession0: pick(undefined, file?.attach?.allow_session0, false),

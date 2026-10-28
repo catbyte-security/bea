@@ -226,7 +226,13 @@ export type ExceptionType =
 
 export interface CrashPolicy {
   first_chance_rows: boolean; // record non-BEA exceptions on s:exceptions (default true)
-  first_chance_blocking: boolean; // blocking report for crash_class at first chance (default true)
+  /**
+   * Blocking report for crash_class at first chance (default false, opt-in: BEA-FEEDBACK #4). The report runs on the
+   * faulting thread, which may hold the target's own locks (ASan's allocator commits shadow memory from its exception
+   * handler; JITs and drivers probe memory under SEH), and waits for the host's ack. The last-chance (UEF) report is
+   * always on.
+   */
+  first_chance_blocking: boolean;
   /**
    * default ["access-violation","illegal-instruction","stack-overflow","arithmetic","abort"]. "system" (every code
    * Frida does not map: C++ throws, OutputDebugString, thread naming, RPC errors) is not in the default (review fix
@@ -239,8 +245,16 @@ export interface CrashPolicy {
   max_blocking_per_10s: number; // rate limit for first-chance blocking reports (default 8, max 64)
   rows_per_sec: number; // first-chance row cap; excess folded into repeat counts (default 1000)
   stack_bytes: number; // stack window in reports (default 256, max 4096)
-  backtrace_depth: number; // ACCURATE backtrace frames (default 32, max 64)
+  backtrace_depth: number; // unwound frames (ntdll RtlVirtualUnwind, never dbghelp) (default 32, max 64)
   include_xmm: boolean; // xmm0..15 bits in reports (default false)
+  /**
+   * Module file-name patterns (case-insensitive, `*` = any run of characters; at most 32 of at most 128 characters,
+   * no path separators) whose first-chance exceptions pass through: an exception whose pc lies in a matching module
+   * returns false at once, with no row and no report (the agent counts it). ASan's runtime (`clang_rt.asan*.dll`) and
+   * access violations inside ASan's shadow memory always pass through. Unhandled ones still reach the last-chance
+   * report. Absent (older hosts) = [].
+   */
+  passthrough_modules?: string[];
 }
 
 export interface HelloParams {
@@ -668,7 +682,9 @@ export interface CrashReport {
   fpcw: Hex | null;
   xmm: Hex[] | null; // 16 × 128-bit as 32-hex-digit Hex, when policy.include_xmm
   instruction: { address: Hex; bytes: HexBytes; text: string } | null;
-  backtrace: { va: Hex; module: string | null; rva: Hex | null }[]; // [faulting pc, ...ACCURATE return addresses]
+  /** [faulting pc, ...return addresses] unwound from the exception's CONTEXT by ntdll's RtlVirtualUnwind (no dbghelp) */
+  backtrace: { va: Hex; module: string | null; rva: Hex | null }[];
+  /** "uef-context" (dbghelp from inside the UEF call) is no longer produced; kept for recorded evidence */
   backtrace_source: "exception-context" | "first-chance-cache" | "uef-context";
   stack: { address: Hex; hex: HexBytes } | null;
   module_map_epoch: number;

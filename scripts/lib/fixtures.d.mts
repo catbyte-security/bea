@@ -6,6 +6,9 @@ export type FixtureId =
   | "behavior"
   | "mathlib"
   | "pidcheck"
+  | "vehcommit"
+  | "waiters"
+  | "mitigated"
   | "bea_emu_fixture"
   | "live_fixture"
   | "cxx_catch";

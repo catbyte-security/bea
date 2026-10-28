@@ -38,6 +38,7 @@ import { safeReadBytes } from "./memory.js";
 import { ModuleIndex } from "./modules.js";
 import { NativeCore } from "./native/core.js";
 import { OriginalBytes } from "./originals.js";
+import { DEFAULT_CRASH_POLICY } from "./pure/coreCrash.js";
 import type { JobRunner } from "./pure/coreJobs.js";
 import { FaultCoalescer } from "./pure/coreRate.js";
 import { StalkerCoordinator } from "./stalkerCo.js";
@@ -53,25 +54,6 @@ export interface EffectiveConfig {
   streams: HelloParams["streams"];
   flow: HelloParams["flow"];
 }
-
-/**
- * "system" is not a crash class by default (review fix AGENT-11): Frida reports every code it does not map as
- * "system", which includes C++ throws (0xE06D7363, 0x20474343), OutputDebugString (0x40010006/0x4001000A), thread
- * naming (0x406D1388) and RPC errors, all normally handled. They were blocking crash reports with no code, used up the
- * 8-per-10 s budget and could be joined to a later fail-fast exit. An unhandled one is reported at last chance.
- */
-export const DEFAULT_CRASH_POLICY: CrashPolicy = {
-  first_chance_rows: true,
-  first_chance_blocking: true,
-  crash_class: ["access-violation", "illegal-instruction", "stack-overflow", "arithmetic", "abort"],
-  ack_timeout_ms: 1000,
-  last_chance_ack_timeout_ms: 2000,
-  max_blocking_per_10s: 8,
-  rows_per_sec: 1000,
-  stack_bytes: 256,
-  backtrace_depth: 32,
-  include_xmm: false,
-};
 
 /** Registration points so feature files plug into core RPCs without core importing features (S4 §3.1). */
 export interface CoreHooks {
@@ -228,7 +210,7 @@ export function createCore(): AgentCore {
     limits: { ...AGENT_LIMIT_DEFAULTS },
     config: {
       session: null,
-      crash: { ...DEFAULT_CRASH_POLICY, crash_class: [...DEFAULT_CRASH_POLICY.crash_class] },
+      crash: { ...DEFAULT_CRASH_POLICY, crash_class: [...DEFAULT_CRASH_POLICY.crash_class], passthrough_modules: [] },
       streams: { flush_ms: AGENT_LIMIT_DEFAULTS.flush_ms, exceptions: true, threads: false },
       flow: {
         high_water_bytes: AGENT_LIMIT_DEFAULTS.flow_high_water_bytes,

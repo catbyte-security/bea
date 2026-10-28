@@ -119,7 +119,7 @@ const traceInputSchema = z
       .min(1)
       .max(16)
       .default(["$main"])
-      .describe("Recorded modules; others are Stalker-excluded."),
+      .describe("Recorded modules. Direct calls into other modules run natively; indirect calls are still followed."),
     ...lifetimeShape,
     max_events: z.number().int().min(1).max(50_000_000).default(1_000_000),
   })

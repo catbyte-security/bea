@@ -17,7 +17,7 @@
         "session_status",
         "close_session"
       ],
-      "sha256": "d79ad16a3aef95737d7d30bb5eeaf21e3a606b81f6a12557a51cd67672062561"
+      "sha256": "2134798dca055e8572645defa889c532b57a98e6e0e0ae99d0ddc0609ca177b6"
     },
     {
       "area": "inspect",
@@ -25,7 +25,7 @@
       "slice": "catalog/inspect.json",
       "docs": "docs/tools/inspect.md",
       "tools": ["list_modules", "list_memory_ranges", "list_threads", "read_memory", "disassemble"],
-      "sha256": "66fbe178c68b3ff4aebf2080833a45ccc077c7926f3f2b95dc342a78b83b9a82"
+      "sha256": "418175ec83be2c03bc7381b1ed6224cf3a5cca65fa4bd8d7bbd753b2a526435e"
     },
     {
       "area": "address",
@@ -65,7 +65,7 @@
       "slice": "catalog/watch.json",
       "docs": "docs/tools/watch.md",
       "tools": ["watch_memory", "trace_execution", "export_coverage"],
-      "sha256": "da8603b6c539d1df3ddc36dd686bddb8aa9a9e6bedd343a256673167ce5a0e85"
+      "sha256": "fd6e68a563469e8dd9ee5f2e6e87ac961f3926d527f16e7deb999a14863d47ad"
     },
     {
       "area": "call",

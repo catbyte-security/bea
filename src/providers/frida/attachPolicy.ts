@@ -1,12 +1,14 @@
 import type { BeaError } from "../../domain/errors/beaError.js";
+import type { ProcessMitigations } from "../../domain/jobhostProtocol.js";
 import type { JsonObject } from "../../domain/json.js";
 import type { ProcessInspection } from "../../ports/jobhost.js";
 import { antiCheatVerdict, basenameOf, type AntiCheatVerdict } from "./antiCheatSignals.js";
 
 /**
- * Attach refusal policy (S3 §5.8 rules 1–11 + D-INT-1 rule 12; pure). Rules run in order and the first hit refuses,
- * before any injection. `null` (unknown) facts never refuse on their own. Rule 12 needs the target-scoped anti-cheat
- * signals the caller gathered (directory, on-disk imports, ancestry).
+ * Attach refusal policy (S3 §5.8 rules 1–11 + D-INT-1 rule 12 + BEA-FEEDBACK item 1 rules 13–14; pure). Rules run in
+ * order and the first hit refuses, before any injection. `null` (unknown) facts never refuse on their own. Rule 12
+ * needs the target-scoped anti-cheat signals the caller gathered (directory, on-disk imports, ancestry); rules 13–14
+ * read the mitigation policies of `bea-jobhost inspect`.
  */
 export interface AttachSelfFacts {
   readonly pid: number;
@@ -70,6 +72,77 @@ export interface AttachDecision {
   /** "Protection or critical status could not be read" */
   readonly protectionUnknown: boolean;
 }
+
+/** A mitigation under which BEA's injection cannot work (rules 13–14). */
+interface BlockingRule {
+  readonly reason: "code-integrity-guard" | "arbitrary-code-guard";
+  /** the Windows policy field, e.g. "ProcessSignaturePolicy.MicrosoftSignedOnly" */
+  readonly mitigation: string;
+  readonly applies: (m: ProcessMitigations) => boolean;
+  /** curated BEA text for the refusal message */
+  readonly effect: string;
+}
+
+const UNSIGNED_AGENT = "so BEA's unsigned agent (frida-agent.dll) cannot be injected";
+
+/**
+ * Rules 13–14 (BEA-FEEDBACK item 1), in rule order. Code Integrity Guard (MicrosoftSignedOnly or StoreSignedOnly):
+ * Windows refuses the unsigned frida-agent.dll (ERROR_INVALID_IMAGE_HASH); Frida only reports that the process
+ * "refused to load frida-agent". Arbitrary Code Guard (ProhibitDynamicCode): the agent needs executable memory, and
+ * Frida 17.23.2's injection crashed such a process with STATUS_ACCESS_VIOLATION (lab); AllowThreadOptOut and
+ * AllowRemoteDowngrade do not change that (BEA never relaxes a target's policy). MitigationOptIn alone, the audit bits,
+ * user shadow stacks (CET) and the image-load policy do not block the agent. Unknown (null) policies never refuse.
+ */
+const BLOCKING_RULES: readonly BlockingRule[] = [
+  {
+    reason: "code-integrity-guard",
+    mitigation: "ProcessSignaturePolicy.MicrosoftSignedOnly",
+    applies: (m) => m.signature?.microsoftSignedOnly === true,
+    effect: `Windows loads only Microsoft-signed DLLs into it, ${UNSIGNED_AGENT}`,
+  },
+  {
+    reason: "code-integrity-guard",
+    mitigation: "ProcessSignaturePolicy.StoreSignedOnly",
+    applies: (m) => m.signature?.storeSignedOnly === true,
+    effect: `Windows loads only Microsoft Store-signed DLLs into it, ${UNSIGNED_AGENT}`,
+  },
+  {
+    reason: "arbitrary-code-guard",
+    mitigation: "ProcessDynamicCodePolicy.ProhibitDynamicCode",
+    applies: (m) => m.dynamicCode?.prohibitDynamicCode === true,
+    effect:
+      "it may not create or change executable memory, which BEA's agent needs, and injecting the agent would crash it",
+  },
+];
+
+const GUARD_NAME: { readonly [R in BlockingRule["reason"]]: string } = {
+  "code-integrity-guard": "Code Integrity Guard",
+  "arbitrary-code-guard": "Arbitrary Code Guard",
+};
+
+const MITIGATION_REMEDIATION =
+  "BEA cannot inject into a process that enforces Code Integrity Guard or Arbitrary Code Guard, and it never relaxes a process's mitigations. For research only, relaunch the program with that mitigation turned off and attach to the new process (Chrome: --disable-gpu-sandbox for the GPU process; --no-sandbox turns the sandbox off for every child process), or study the same code in a process that does not enforce it. Such a configuration weakens the program's security: use it only in an isolated lab, never for normal use.";
+
+/** Rules 13–14: the first mitigation of `m` under which the injection cannot work, naming every one that applies. */
+const mitigationRefusal = (m: ProcessMitigations): BeaError | null => {
+  const blocking = BLOCKING_RULES.filter((rule) => rule.applies(m));
+  const first = blocking[0];
+  if (first === undefined) return null;
+  return {
+    _tag: "AccessDenied",
+    operation: "attach_process",
+    reason: first.reason,
+    message: `The process enforces ${GUARD_NAME[first.reason]} (${first.mitigation}): ${first.effect}. Nothing was injected.`,
+    remediation: MITIGATION_REMEDIATION,
+    diagnostics: {
+      mitigation: first.mitigation,
+      blocking: blocking.map((b) => b.mitigation),
+      signature_policy_flags: m.signature?.flags ?? null,
+      dynamic_code_policy_flags: m.dynamicCode?.flags ?? null,
+      user_shadow_stack_policy_flags: m.userShadowStack?.flags ?? null,
+    },
+  };
+};
 
 export const evaluateAttachPolicy = (input: {
   readonly pid: number;
@@ -155,5 +228,7 @@ export const evaluateAttachPolicy = (input: {
         },
       ),
     );
-  return decide(null);
+  // rules 13–14: a mitigation that makes the injection impossible (after anti-cheat: no override can lift these)
+  const mitigations = i.mitigations ?? null;
+  return decide(mitigations === null ? null : mitigationRefusal(mitigations));
 };

@@ -38,4 +38,7 @@ export const SESSIONS_LIMITATIONS = {
   // ---- review fix LIFE-8 (append-only)
   AGENT_LEFT_LOADED:
     "BEA's agent did not respond and could not be unloaded (a call that never returned holds its thread): frida-agent.dll, its threads and the running call stay in the process until it exits, although BEA detached.",
+  // ---- BEA-FEEDBACK 2026-10-28 (append-only)
+  USER_SHADOW_STACKS:
+    "The process enforces user-mode hardware shadow stacks (Intel CET); trace_execution and hooks with leave captures are not verified on such processes.",
 } as const satisfies Readonly<Record<string, string | ((...args: never[]) => string)>>;

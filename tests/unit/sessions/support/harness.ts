@@ -82,6 +82,11 @@ export const createHarness = (options: HarnessOptions = {}): Harness => {
     limits: {
       maxLiveSessions: { value: options.maxLiveSessions ?? 4, source: "default" },
       rpcDefaultTimeoutMs: { value: 10_000, source: "default" },
+      attachTimeoutMs: { value: 10_000, source: "default" },
+    },
+    crash: {
+      firstChanceBlocking: { value: false, source: "default" },
+      passthroughModules: { value: [], source: "default" },
     },
   } as unknown as BeaConfig);
   const limits = options.limits?.(baseLimits) ?? baseLimits;

@@ -58,9 +58,10 @@ export const listThreads = (
   liveOp(app, ctx, input.session_id, { mode: "exclusive", need: "agent" }, async (session, op) => {
     const literals = literalsOf(app);
     if (!literals.ok) return literals;
+    // names: the agent reads each thread's GetThreadDescription (Chrome names CrGpuMain, VizCompositorThread, ...)
     const listed = await session.agent.call(
       "listThreads",
-      { registers: input.registers ? "gpr" : "none", teb: false, names: false },
+      { registers: input.registers ? "gpr" : "none", teb: false, names: true },
       { op },
     );
     if (!listed.ok) return listed;
@@ -78,6 +79,7 @@ export const listThreads = (
       const entry = t.entry === null ? null : clipLoc(await app.services.address.describeCode(space, BigInt(t.entry)));
       rows.push({
         tid: t.id,
+        name: t.name === null || t.name === "" ? null : clip(t.name, INSPECT_CAPS.threadName),
         main: mainEntry !== null && t.entry !== null && BigInt(t.entry) === mainEntry,
         entry,
         ...(input.registers ? { registers: gprsOf(t.regs) } : {}),

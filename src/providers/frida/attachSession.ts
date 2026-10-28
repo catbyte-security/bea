@@ -1,8 +1,11 @@
 import type { BeaError } from "../../domain/errors/beaError.js";
 import { LIMITATIONS } from "../../domain/evidence/limitations.js";
+import type { ProcessMitigations } from "../../domain/jobhostProtocol.js";
+import type { JsonObject } from "../../domain/json.js";
+import { exitInfoOf } from "../../domain/process/ntstatus.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import type { SensitiveLiterals } from "../../ports/evidence.js";
-import type { JobHostFactory, ProcessInspection, ProcessWatcherPort } from "../../ports/jobhost.js";
+import type { JobHostFactory, ProcessInspection, ProcessWatcherPort, RootExit } from "../../ports/jobhost.js";
 import type { AttachInput, OperationContext, ProcessIdentityFacts, SessionObservation } from "../../ports/sessions.js";
 import { abortedError } from "./aborts.js";
 import type { AgentBundle } from "./agentBundle.js";
@@ -18,8 +21,9 @@ import { evaluateAttachPolicy, type AttachPolicyConfig, type AttachSelfFacts } f
 import type { LiveDevice } from "./FridaHost.js";
 import type { FridaDeviceLike, FridaSessionLike } from "./fridaPorts.js";
 import { withTempDir } from "./fridaTemp.js";
-import { createNativeCancel } from "./NativeCancel.js";
+import { createNativeCancel, type NativeCancel } from "./NativeCancel.js";
 import type { PeHeaderFacts } from "./peHeader.js";
+import { withFridaMessage } from "./rpcErrors.js";
 import type { SessionRecord } from "./SessionRecord.js";
 import { cleanupStartup, type CleanupDeps } from "./startupCleanup.js";
 import {
@@ -37,11 +41,13 @@ import {
 } from "./startup.js";
 
 /**
- * Attach path (S3 §9; DESIGN §5.1): bea-jobhost inspect → the refusal policy (rules 1–12, first hit wins, before any
- * injection; rule 12 = target-scoped anti-cheat signals: directory, on-disk imports, ancestry) → expect_sha256 →
- * bea-jobhost watch (pins the pid, reports the exit code, has no TERMINATE right) → attach → agent → hello → the live
- * module list is checked for anti-cheat modules before any instrumentation → instance → RUNNING. An attached target is
- * NEVER killed: every failure unloads and detaches.
+ * Attach path (S3 §9; DESIGN §5.1): bea-jobhost inspect → the refusal policy (rules 1–14, first hit wins, before any
+ * injection; rule 12 = target-scoped anti-cheat signals: directory, on-disk imports, ancestry; rules 13–14 = Code
+ * Integrity Guard and Arbitrary Code Guard, under which the injection cannot work) → expect_sha256 → bea-jobhost watch
+ * (pins the pid, reports the exit code, has no TERMINATE right) → attach → agent → hello → the live module list is
+ * checked for anti-cheat modules before any instrumentation → instance → RUNNING. An attached target is NEVER killed:
+ * every failure unloads and detaches. A failed injection keeps Frida's own text (diagnostics.frida_message), and one
+ * that ended the process is reported as target_exited with its exit status.
  */
 export interface AttachDeps extends StartupContext, CleanupDeps {
   readonly jobhost: JobHostFactory;
@@ -92,6 +98,8 @@ export const runAttach = async (
   if (!inspected.ok) return inspected;
   const inspection = inspected.value;
   record.imagePath = inspection.imagePath;
+  const mitigations = mitigationFacts(inspection.mitigations);
+  deps.logger.debug("attach target mitigations", { session: record.id, pid, mitigations });
   clock.mark("inspect");
 
   // step 3: policy (target-scoped anti-cheat signals gathered before any injection)
@@ -119,6 +127,8 @@ export const runAttach = async (
   });
   if (decision.refusal !== null) return err({ ...decision.refusal, operation });
   if (decision.protectionUnknown) record.addLimitation(LIMITATIONS.PROTECTION_UNKNOWN);
+  if (inspection.mitigations?.userShadowStack?.enableUserShadowStack === true)
+    record.addLimitation(LIMITATIONS.USER_SHADOW_STACKS);
   clock.mark("policy");
 
   // step 4: expect_sha256
@@ -155,15 +165,17 @@ export const runAttach = async (
   try {
     // LIFE-3: the injection that extracts Frida's agent runs with TEMP at BEA's own (swept) directory
     session = await withTempDir(deps.fridaTempDir?.() ?? null, () =>
-      fridaStep(() => live.device.attach(pid, cancel.token), deps, op, "attach", {
-        cancel,
-        ms: deps.limits.startup.attachMs,
+      fridaStepWithText(deps, op, {
+        phase: "attach",
+        work: () => live.device.attach(pid, cancel.token),
+        deadline: { cancel, ms: deps.limits.startup.attachMs },
+        literals: record.literals,
       }),
     );
   } finally {
     cancel.dispose();
   }
-  if (!session.ok) return fail(session.error);
+  if (!session.ok) return fail(await injectionFailure(record, session.error));
   clock.mark("attach");
 
   const startTime =
@@ -238,7 +250,9 @@ export const runAttach = async (
   for (const sentence of record.limitations) if (!limitations.includes(sentence)) limitations.push(sentence);
 
   const agentIdentity = agentIdentityOf(bundle, deps.beaVersion);
-  const containment = containmentJson(record);
+  // the target's own mitigation policies travel with the attach evidence (shadow stacks matter to trace_execution)
+  const base = containmentJson(record);
+  const containment = base === undefined ? undefined : { ...base, target_mitigations: mitigations };
   const registered = await registerInstance(
     deps,
     record,
@@ -301,6 +315,124 @@ export const runAttach = async (
   return ok(record.observation);
 };
 
+interface TextStep<T> {
+  readonly phase: string;
+  readonly work: () => Promise<T>;
+  readonly deadline: { readonly cancel: NativeCancel; readonly ms: number };
+  /** caller-declared sensitive literals: a Frida text that contains one is withheld */
+  readonly literals: SensitiveLiterals | null;
+}
+
+/** fridaStep that keeps Frida's own rejection text in the curated error (diagnostics.frida_message, BEA-FEEDBACK 1c). */
+const fridaStepWithText = async <T>(
+  deps: AttachDeps,
+  op: OperationContext,
+  step: TextStep<T>,
+): Promise<Result<T, BeaError>> => {
+  let cause: unknown;
+  const result = await fridaStep(
+    () =>
+      step.work().catch((rejection: unknown) => {
+        cause = rejection;
+        throw rejection;
+      }),
+    deps,
+    op,
+    step.phase,
+    step.deadline,
+  );
+  return result.ok || cause === undefined ? result : err(withFridaMessage(result.error, cause, step.literals));
+};
+
+/** How long a failed injection waits for the watcher's exit report (it arrives within milliseconds of the exit). */
+const INJECTION_EXIT_WAIT_MS = 500;
+
+const exitWithin = async (watcher: ProcessWatcherPort, ms: number): Promise<RootExit | null> => {
+  if (watcher.rootExit !== null) return watcher.rootExit;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      watcher.exited,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+};
+
+/**
+ * A failed `device.attach` (the injection). Frida says only that the process "either refused to load frida-agent, or
+ * terminated during injection"; the exit watcher tells the two apart. BEA never kills an attached process, so a target
+ * that ended meanwhile ended during the injection: target_exited with its exit status (Frida 17.23.2 crashes a process
+ * that enforces Arbitrary Code Guard this way, which rule 14 now refuses before injecting). Otherwise the error stays.
+ */
+const injectionFailure = async (record: SessionRecord, error: BeaError): Promise<BeaError> => {
+  const watcher = record.watcher;
+  if (watcher === null || error._tag !== "ProviderFailure") return error;
+  const exit = await exitWithin(watcher, INJECTION_EXIT_WAIT_MS);
+  if (exit === null) return error;
+  const info = exitInfoOf(exit.code, exit.byKill);
+  return {
+    _tag: "TargetExited",
+    operation: error.operation,
+    instance_id: "",
+    exit: info,
+    detach_reason: null,
+    message: `The process ended (${info.name ?? info.code_hex ?? "exit status unknown"}) while BEA was injecting its agent into it.`,
+    remediation:
+      "BEA did not end the process; it ended during the injection, and a new instance in the same configuration may end the same way. Check details.diagnostics.frida_message, and whether the program enforces a protection BEA does not detect (Arbitrary Code Guard and Code Integrity Guard are refused before injecting).",
+    diagnostics: { ...error.diagnostics, phase: "attach", during: "injection" },
+  };
+};
+
+/** The target's mitigation policies as evidence facts (snake_case; null: not read). */
+const mitigationFacts = (m: ProcessMitigations | null | undefined): JsonObject | null => {
+  if (m === null || m === undefined) return null;
+  const { signature: sig, dynamicCode: dyn, userShadowStack: ssp, imageLoad: img } = m;
+  return {
+    access: m.access,
+    signature:
+      sig === null
+        ? null
+        : {
+            flags: sig.flags,
+            microsoft_signed_only: sig.microsoftSignedOnly,
+            store_signed_only: sig.storeSignedOnly,
+            mitigation_opt_in: sig.mitigationOptIn,
+          },
+    dynamic_code:
+      dyn === null
+        ? null
+        : {
+            flags: dyn.flags,
+            prohibit_dynamic_code: dyn.prohibitDynamicCode,
+            allow_thread_opt_out: dyn.allowThreadOptOut,
+            allow_remote_downgrade: dyn.allowRemoteDowngrade,
+          },
+    user_shadow_stack:
+      ssp === null
+        ? null
+        : {
+            flags: ssp.flags,
+            enabled: ssp.enableUserShadowStack,
+            strict_mode: ssp.enableUserShadowStackStrictMode,
+            block_non_cet_binaries: ssp.blockNonCetBinaries,
+          },
+    image_load:
+      img === null
+        ? null
+        : {
+            flags: img.flags,
+            no_remote_images: img.noRemoteImages,
+            no_low_mandatory_label_images: img.noLowMandatoryLabelImages,
+          },
+    unreadable: m.unreadable.map((u) => ({ policy: u.policy, win32: u.win32 })),
+  };
+};
+
 const processListing = async (
   deps: AttachDeps,
   device: FridaDeviceLike,
@@ -313,13 +445,12 @@ const processListing = async (
     signal: op.signal,
   });
   try {
-    const listed = await fridaStep(
-      () => device.enumerateProcesses({ scope: "metadata" }, cancel.token),
-      deps,
-      op,
-      "policy",
-      { cancel, ms: deps.limits.startup.inspectMs },
-    );
+    const listed = await fridaStepWithText(deps, op, {
+      phase: "policy",
+      work: () => device.enumerateProcesses({ scope: "metadata" }, cancel.token),
+      deadline: { cancel, ms: deps.limits.startup.inspectMs },
+      literals: null,
+    });
     if (!listed.ok) return listed;
     return ok(
       listed.value.map((p) => {

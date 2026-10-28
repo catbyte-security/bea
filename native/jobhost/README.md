@@ -47,6 +47,10 @@ The binary is a build output and is never committed.
   such adopt failed with `identity`/`image-path`. When the strings differ, the helper now compares file identity (volume
   serial number + 128-bit `FileIdInfo` id, the 64-bit NTFS index as fallback; both paths opened for attributes only):
   the same file passes, a different file is still refused with `image-path`. Protocol unchanged.
+- `inspect` reports `mitigations` `{access, signature, dynamicCode, userShadowStack, imageLoad}`, each `{flags,
+  win32}` (`flags` null when the read failed), for BEA's Code Integrity Guard / Arbitrary Code Guard attach refusals.
+  `PROCESS_QUERY_LIMITED_INFORMATION` suffices on Windows 11; `PROCESS_QUERY_INFORMATION` is opened only after
+  `ERROR_ACCESS_DENIED` (`access:"query"`). Protocol unchanged (the field is additive).
 
 ## Tests
 

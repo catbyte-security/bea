@@ -149,6 +149,23 @@ describe("PE reader on gcc fixtures", () => {
 });
 
 describe.skipIf(!windows)("PE reader on system DLLs", () => {
+  it("resolves every exported function start in ntdll to itself, not to a function sharing folded unwind info", async () => {
+    const ntdll = await open(SYSTEM_DLLS[2] ?? "");
+    const pdata = await ntdll.functions();
+    let checked = 0;
+    const wrong: string[] = [];
+    for (const e of await ntdll.exports()) {
+      if (e.rva === null) continue;
+      const hit = pdata.lookup(e.rva);
+      if (hit === null || hit.begin !== e.rva) continue;
+      checked++;
+      if (hit.primary_begin !== e.rva)
+        wrong.push(`${e.name ?? `#${String(e.ordinal)}`} -> 0x${hit.primary_begin.toString(16)}`);
+    }
+    expect(checked).toBeGreaterThan(500);
+    expect(wrong.slice(0, 10)).toEqual([]);
+  });
+
   it("parses forwarders, NONAME ordinals, delay imports, chained .pdata, CodeView and fothk", async () => {
     const kernel32 = await open(SYSTEM_DLLS[0] ?? "");
     const kexports = await kernel32.exports();

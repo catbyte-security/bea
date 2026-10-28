@@ -160,7 +160,7 @@
       "name": "list_threads",
       "title": "List Threads",
       "phase": "P2",
-      "description_chars": 314,
+      "description_chars": 358,
       "effects": ["readsTargetMemory", "mutatesSession", "idempotent"],
       "annotations": {
         "readOnlyHint": true,
@@ -185,8 +185,8 @@
       "max_input_bytes": 1048576,
       "examples": 1,
       "input_schema_bytes": 571,
-      "output_schema_bytes": 5047,
-      "model_visible_bytes": 1067,
+      "output_schema_bytes": 5123,
+      "model_visible_bytes": 1111,
       "input_depth": 3,
       "output_depth": 12,
       "input_schema": {
@@ -219,7 +219,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false
       },
-      "output_schema_sha256": "ecd43662cb4abb1a866d0faabf2f2a1b60bf990ad1890b751b080b5258f40a85"
+      "output_schema_sha256": "82b9ea7f836e92d71580ceb0fab074cc9dee2771ec3c82af7db83d9e92f551fa"
     },
     {
       "name": "read_memory",

@@ -658,12 +658,53 @@ static __attribute__((noreturn)) void modeWatch(int argc, wchar_t** argv) {
 typedef BOOL(WINAPI* PIsWow64Process2)(HANDLE, USHORT*, USHORT*);
 typedef BOOL(WINAPI* PIsProcessCritical)(HANDLE, PBOOL);
 typedef BOOL(WINAPI* PGetProcessInformation)(HANDLE, PROCESS_INFORMATION_CLASS, LPVOID, DWORD);
+typedef BOOL(WINAPI* PGetProcessMitigationPolicy)(HANDLE, PROCESS_MITIGATION_POLICY, PVOID, SIZE_T);
 
 static const char* tri(int known, int value) { return !known ? "null" : value ? "true" : "false"; }
 
 static void numOrNull(int have, ULONGLONG v, char out[24]) {
   if (have) u64dec(v, out);
   else strcpy(out, "null");
+}
+
+/* One GetProcessMitigationPolicy read: {"flags":<DWORD>,"win32":0}, or {"flags":null,"win32":<GetLastError>} when it
+ * failed (an unknown policy is reported as unknown, never guessed). Every policy read here is one DWORD of flags. */
+static void mitigationJson(PGetProcessMitigationPolicy get, HANDLE h, PROCESS_MITIGATION_POLICY policy, char* out,
+                           size_t cap) {
+  DWORD flags = 0;
+  if (!get) snprintf(out, cap, "{\"flags\":null,\"win32\":%lu}", (unsigned long)ERROR_PROC_NOT_FOUND);
+  else if (get(h, policy, &flags, sizeof flags)) snprintf(out, cap, "{\"flags\":%lu,\"win32\":0}", (unsigned long)flags);
+  else snprintf(out, cap, "{\"flags\":null,\"win32\":%lu}", (unsigned long)GetLastError());
+}
+
+/* The process mitigation policies that decide whether BEA can inject at all (BEA-FEEDBACK item 1): the code-signing
+ * policy (Code Integrity Guard), the dynamic-code policy (Arbitrary Code Guard), and for information the user-mode
+ * shadow-stack (CET) and image-load policies. Read-only. The documentation asks for PROCESS_QUERY_INFORMATION; on
+ * Windows 11 PROCESS_QUERY_LIMITED_INFORMATION is enough (lab: the inspect handle reads every policy, a handle with
+ * SYNCHRONIZE only fails with ERROR_ACCESS_DENIED), so a PROCESS_QUERY_INFORMATION handle is opened only when the
+ * inspect handle is refused. `access` names the handle the reads used. */
+static void mitigationsJson(HANDLE h, DWORD pid, char* out, size_t cap) {
+  PGetProcessMitigationPolicy get =
+      (PGetProcessMitigationPolicy)(void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetProcessMitigationPolicy");
+  HANDLE mh = h;
+  const char* access = "limited";
+  DWORD probe = 0;
+  if (get && !get(h, ProcessSignaturePolicy, &probe, sizeof probe) && GetLastError() == ERROR_ACCESS_DENIED) {
+    HANDLE q = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (q) {
+      mh = q;
+      access = "query";
+    }
+  }
+  char sig[64], dyn[64], ssp[64], img[64];
+  mitigationJson(get, mh, ProcessSignaturePolicy, sig, sizeof sig);
+  mitigationJson(get, mh, ProcessDynamicCodePolicy, dyn, sizeof dyn);
+  mitigationJson(get, mh, ProcessUserShadowStackPolicy, ssp, sizeof ssp);
+  mitigationJson(get, mh, ProcessImageLoadPolicy, img, sizeof img);
+  if (mh != h) CloseHandle(mh);
+  snprintf(out, cap,
+           "{\"access\":\"%s\",\"signature\":%s,\"dynamicCode\":%s,\"userShadowStack\":%s,\"imageLoad\":%s}", access,
+           sig, dyn, ssp, img);
 }
 
 static __attribute__((noreturn)) void modeInspect(int argc, wchar_t** argv) {
@@ -734,13 +775,15 @@ static __attribute__((noreturn)) void modeInspect(int argc, wchar_t** argv) {
   numOrNull(haveWow, nm, nmS);
   if (ct) snprintf(ctS, sizeof ctS, "\"%s\"", cts); else strcpy(ctS, "null");
   int isProtected = haveProt && pli.ProtectionLevel != PROTECTION_LEVEL_NONE;
+  char mit[384];
+  mitigationsJson(h, pid, mit, sizeof mit);
   emitf("{\"event\":\"inspect\",\"pid\":%lu,\"access\":\"%s\",\"exited\":%s,\"exitCode\":%s,"
         "\"creationTime100ns\":%s,\"imagePath\":%s,\"parentPid\":%s,\"sessionId\":%s,\"critical\":%s,"
         "\"protectionLevel\":%s,\"protected\":%s,\"wow64\":%s,\"processMachine\":%s,\"nativeMachine\":%s,"
-        "\"inJob\":%s,\"elevated\":%s,\"integrityRid\":%s,\"sameUser\":%s}",
+        "\"inJob\":%s,\"elevated\":%s,\"integrityRid\":%s,\"sameUser\":%s,\"mitigations\":%s}",
         pid, access, tri(exitedKnown, exited), exitS, ctS, path, ppidS, sessS, tri(haveCrit, crit), protS,
         tri(haveProt, isProtected), tri(haveWow, pm != IMAGE_FILE_MACHINE_UNKNOWN), pmS, nmS, tri(haveJob, inJob),
-        tri(haveElev, elevated), ilS, tri(haveUser, sameUser));
+        tri(haveElev, elevated), ilS, tri(haveUser, sameUser), mit);
   finish(0);
 }
 

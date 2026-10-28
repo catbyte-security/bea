@@ -44,7 +44,7 @@ Deadline 30,000 ms · input ≤ 1,048,576 bytes · evidence always as `bea.memor
 
 ## `list_threads` — List Threads
 
-List the target's threads (tid, entry routine as module+RVA, main flag) and optionally their general registers. Thread state and names are unreliable on Windows and are not reported. Use the tids for call_function thread_id, trace_execution thread_ids and hook thread filters. Read-only through the injected agent.
+List the target's threads (tid, name the program set with SetThreadDescription or null, entry routine as module+RVA, main flag) and optionally their general registers. Thread state is unreliable on Windows and is not reported. Use the tids for call_function thread_id, trace_execution thread_ids and hook thread filters. Read-only through the injected agent.
 
 | Phase | Hints                 | Effects                                       | Gate | CLI                             |
 | ----- | --------------------- | --------------------------------------------- | ---- | ------------------------------- |

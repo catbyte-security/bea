@@ -50,7 +50,7 @@ Launch a program as a BEA-owned target: created suspended inside a kill-on-close
 | `expect_sha256`   | string `^[0-9a-fA-F]{64}$`               | no       | —       | Expected sha256 of the image file (64 hex), e.g. from REA or Ghidra.                          |
 | `redact_literals` | array<string ≤256> ≤32                   | no       | `[]`    | Session-wide sensitive strings (4..256 chars) redacted from evidence; only the count is kept. |
 
-Deadline 60,000 ms · input ≤ 1,048,576 bytes · evidence always as `bea.process.instance` · sessions none · results carry untrusted target content.
+Deadline 120,000 ms · input ≤ 1,048,576 bytes · evidence always as `bea.process.instance` · sessions none · results carry untrusted target content.
 
 ## `attach_process` — Attach Process
 
@@ -67,7 +67,7 @@ Attach to a running process the user named (pid or exact image name) and inject 
 | `expect_sha256`   | string `^[0-9a-fA-F]{64}$` | no       | —       | Expected sha256 of the image file (64 hex), e.g. from REA or Ghidra.                          |
 | `redact_literals` | array<string ≤256> ≤32     | no       | `[]`    | Session-wide sensitive strings (4..256 chars) redacted from evidence; only the count is kept. |
 
-Deadline 60,000 ms · input ≤ 1,048,576 bytes · evidence always as `bea.process.instance` · sessions none · results carry untrusted target content.
+Deadline 120,000 ms · input ≤ 1,048,576 bytes · evidence always as `bea.process.instance` · sessions none · results carry untrusted target content.
 
 ## `resume_process` — Resume Process
 

@@ -12,8 +12,6 @@ import {
   type AgentResult,
   type AgentRpcImpl,
   type AgentStatus,
-  type CrashPolicy,
-  type ExceptionType,
   type FlushParams,
   type HelloParams,
   type HelloResult,
@@ -31,19 +29,8 @@ import { env } from "./env.js";
 import { badParam, fail, ok, raise } from "./errors.js";
 import { fingerprint } from "./fingerprint.js";
 import { processInfo } from "./inspect.js";
-import { DEFAULT_CRASH_POLICY, type AgentCore } from "./state.js";
-
-const EXCEPTION_TYPES: readonly ExceptionType[] = [
-  "abort",
-  "access-violation",
-  "guard-page",
-  "illegal-instruction",
-  "stack-overflow",
-  "arithmetic",
-  "breakpoint",
-  "single-step",
-  "system",
-];
+import { clampCrashPolicy } from "./pure/coreCrash.js";
+import type { AgentCore } from "./state.js";
 
 /** Boot (index.ts step "core.init"): every step records its stage so a failure reports it in {bea:"fatal"}. */
 export function init(c: AgentCore): void {
@@ -78,27 +65,6 @@ const core = (): AgentCore => {
 
 const clampInt = (v: unknown, lo: number, hi: number, fallback: number): number =>
   typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(Math.floor(v), hi)) : fallback;
-
-/** Host crash policy clamped to the documented maxima (CrashPolicy comments). */
-export const clampCrashPolicy = (p: Partial<CrashPolicy> | undefined): CrashPolicy => {
-  const d = DEFAULT_CRASH_POLICY;
-  const classes = Array.isArray(p?.crash_class)
-    ? p.crash_class.filter((t) => EXCEPTION_TYPES.includes(t))
-    : d.crash_class;
-  return {
-    first_chance_rows: typeof p?.first_chance_rows === "boolean" ? p.first_chance_rows : d.first_chance_rows,
-    first_chance_blocking:
-      typeof p?.first_chance_blocking === "boolean" ? p.first_chance_blocking : d.first_chance_blocking,
-    crash_class: [...classes],
-    ack_timeout_ms: clampInt(p?.ack_timeout_ms, 0, 5000, d.ack_timeout_ms),
-    last_chance_ack_timeout_ms: clampInt(p?.last_chance_ack_timeout_ms, 0, 5000, d.last_chance_ack_timeout_ms),
-    max_blocking_per_10s: clampInt(p?.max_blocking_per_10s, 0, 64, d.max_blocking_per_10s),
-    rows_per_sec: clampInt(p?.rows_per_sec, 1, 100_000, d.rows_per_sec),
-    stack_bytes: clampInt(p?.stack_bytes, 0, 4096, d.stack_bytes),
-    backtrace_depth: clampInt(p?.backtrace_depth, 0, 64, d.backtrace_depth),
-    include_xmm: typeof p?.include_xmm === "boolean" ? p.include_xmm : d.include_xmm,
-  };
-};
 
 /** "module!export" lists resolved to VAs (modules not loaded are skipped). */
 const resolveApiList = (names: readonly string[]): { api: string; va: Hex }[] => {

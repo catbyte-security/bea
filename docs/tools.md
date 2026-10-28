@@ -8,13 +8,13 @@ page and golden slice (`tests/golden/catalog/<area>.json`), owned by the area's 
 
 | Area         | Owner       | Tools                                                                                                                  | Page                                       | Slice sha256       |
 | ------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------ |
-| `sessions`   | WP4-SESS    | `bea_status`, `list_processes`, `spawn_process`, `attach_process`, `resume_process`, `session_status`, `close_session` | [tools/sessions.md](tools/sessions.md)     | `d79ad16a3aef9573` |
-| `inspect`    | WP6-INSPECT | `list_modules`, `list_memory_ranges`, `list_threads`, `read_memory`, `disassemble`                                     | [tools/inspect.md](tools/inspect.md)       | `66fbe178c68b3ff4` |
+| `sessions`   | WP4-SESS    | `bea_status`, `list_processes`, `spawn_process`, `attach_process`, `resume_process`, `session_status`, `close_session` | [tools/sessions.md](tools/sessions.md)     | `2134798dca055e85` |
+| `inspect`    | WP6-INSPECT | `list_modules`, `list_memory_ranges`, `list_threads`, `read_memory`, `disassemble`                                     | [tools/inspect.md](tools/inspect.md)       | `418175ec83be2c03` |
 | `address`    | WP5-ADDR    | `list_module_symbols`, `map_address`                                                                                   | [tools/address.md](tools/address.md)       | `7ff61525206c83b1` |
 | `scan`       | WP10-SCAN   | `scan_memory`, `scan_next`, `scan_results`                                                                             | [tools/scan.md](tools/scan.md)             | `e30018b23d86b00e` |
 | `instrument` | WP7-HOOK    | `hook_function`, `wait`, `stop_instrumentation`, `query_events`                                                        | [tools/instrument.md](tools/instrument.md) | `03f77d42f5dbcafc` |
 | `behavior`   | WP8-BEHAV   | `trace_api`                                                                                                            | [tools/behavior.md](tools/behavior.md)     | `fd8a3ee9975ce4d8` |
-| `watch`      | WP9-WATCH   | `watch_memory`, `trace_execution`, `export_coverage`                                                                   | [tools/watch.md](tools/watch.md)           | `da8603b6c539d1df` |
+| `watch`      | WP9-WATCH   | `watch_memory`, `trace_execution`, `export_coverage`                                                                   | [tools/watch.md](tools/watch.md)           | `fd6e68a563469e8d` |
 | `call`       | WP11-CALL   | `call_function`                                                                                                        | [tools/call.md](tools/call.md)             | `c614e78bac293073` |
 | `modify`     | WP12-MODIFY | `write_memory`, `override_function`, `run_script`                                                                      | [tools/modify.md](tools/modify.md)         | `0ddefbb5fc871e15` |
 | `dump`       | WP13-DUMP   | `dump_memory`                                                                                                          | [tools/dump.md](tools/dump.md)             | `394f729ba64153da` |

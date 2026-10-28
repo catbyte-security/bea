@@ -60,6 +60,27 @@ export const FIXTURE_SPECS = [
     args: ["-O2", ...C_COMMON],
   },
   {
+    id: "vehcommit",
+    source: "fixtures/native/vehcommit.c",
+    file: "vehcommit.exe",
+    tool: "cc",
+    args: ["-O2", ...C_COMMON],
+  },
+  {
+    id: "waiters",
+    source: "fixtures/native/waiters.c",
+    file: "waiters.exe",
+    tool: "cc",
+    args: ["-O2", ...C_COMMON],
+  },
+  {
+    id: "mitigated",
+    source: "fixtures/native/mitigated.c",
+    file: "mitigated.exe",
+    tool: "cc",
+    args: ["-O2", ...C_COMMON],
+  },
+  {
     id: "bea_emu_fixture",
     source: "fixtures/emu/bea_emu_fixture.c",
     file: "bea_emu_fixture.dll",
@@ -409,6 +430,9 @@ const EXPECTATIONS = {
   },
   pidcheck: () => ({}),
   behavior: () => ({}),
+  vehcommit: () => ({}),
+  waiters: () => ({}),
+  mitigated: () => ({}),
 };
 
 function expectationsFor(id, pe, functions) {

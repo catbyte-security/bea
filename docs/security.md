@@ -52,7 +52,10 @@ refused before BEA opens them (opening a share would send the user's NTLM creden
 Attach refusal rules, first hit wins: pid ≤ 4; BEA's own process tree (itself, its MCP client, its helpers); a pid
 already in a session; an exited process; a protected (PPL) process; a critical process; session 0 (unless
 `attach.allow_session0`); WoW64; the system denylist (plus `attach.extra_denylist`); another user's process; a
-higher-integrity process; target-scoped anti-cheat signals.
+higher-integrity process; target-scoped anti-cheat signals; Code Integrity Guard; Arbitrary Code Guard. BEA never
+relaxes a target's mitigations, and no override lifts the last two refusals. The mitigation policies come from
+`bea-jobhost inspect`, which opens `PROCESS_QUERY_INFORMATION` (read-only) only when the limited query handle cannot
+read a policy.
 
 ### Anti-cheat (D-INT-1)
 
@@ -88,7 +91,10 @@ BEA's controls:
    tell the agent to treat such content as data and to report embedded requests.
 2. **Clean prose channels.** Limitation sentences are fixed BEA text whose parameters are numbers, hex, ids or enum
    codes. Error messages and remediation never include agent free text (the agent's own error messages are dropped
-   from diagnostics). An agent can therefore trust the envelope outside `result` fields.
+   from diagnostics). An agent can therefore trust the envelope outside `result` fields. One exception is labeled:
+   a failed spawn, attach or resume carries Frida's own failure text in `details.diagnostics.frida_message`, with
+   control and format characters removed, at most 300 characters, and withheld when it contains a caller literal.
+   Treat it as untrusted data. `list_threads` `name` is target text as well.
 3. **No side effect driven by content alone.** Every `out_path` (`dump_memory`, `export_coverage`,
    `export_evidence`, scenario `--evidence-out`) passes `checkOutputPath`:
    - drive-absolute, no `..`, no alternate data streams (`file:stream`);

@@ -1,8 +1,9 @@
 // WP3-AGENT acceptance (raw Frida; DESIGN §8.4 WP3 row, S4 §7.4, §19 tests 3–4): crash capture and exit flush of
 // owned targets adopted into a bea-jobhost job (kill-on-close, DIE_ON_UNHANDLED_EXCEPTION). A crash → first-chance
-// blocking report + last-chance (UEF) report, both acked, and the root exit code 0xC0000005 within 3 s. A fast exit
-// right after resume → the exit hook flushes every buffered row (hook rows through the instrument stream + first-chance
-// exception rows) before the bounded ack.
+// blocking report (opt-in since BEA-FEEDBACK #4; this lane's hello asks for it) + last-chance (UEF) report, both acked,
+// and the root exit code 0xC0000005 within 3 s (agentCrashLastChance.test.ts covers the default, reports off). A fast
+// exit right after resume → the exit hook flushes every buffered row (hook rows through the instrument stream +
+// first-chance exception rows) before the bounded ack.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import type { CrashReport, ExceptionRow, ExitMessage } from "../../../src/shared/agentProtocol.js";

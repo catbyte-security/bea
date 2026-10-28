@@ -1,8 +1,8 @@
 import { HARD_LIMITS, type BeaConfig } from "../../domain/config.js";
 
 /**
- * Host constants and the two configurable limits (S3 §3, D-INT-6, D-INT-7). Fixed values carry the sentence "This
- * release has no runtime override." in their refusals.
+ * Host constants, the configurable limits (S3 §3, D-INT-6, D-INT-7) and the configurable part of the agent's crash
+ * policy (BEA-FEEDBACK #4). Fixed values carry the sentence "This release has no runtime override." in their refusals.
  */
 export interface HostLimits {
   /** config limits.max_live_sessions / BEA_MAX_LIVE_SESSIONS, 1..8 (default 4) */
@@ -20,6 +20,7 @@ export interface HostLimits {
     readonly adoptMs: number;
     readonly inspectMs: number;
     readonly watchMs: number;
+    /** config limits.attach_timeout_ms / BEA_ATTACH_TIMEOUT_MS, 1000..110000 (default 10000); spawn and attach */
     readonly attachMs: number;
     readonly createScriptMs: number;
     readonly loadMs: number;
@@ -81,6 +82,11 @@ export interface HostLimits {
   readonly userScript: { readonly maxMessageBytes: number; readonly maxErrors: number; readonly unloadMs: number };
   /** background ping after an RPC timeout; at most one ping per this interval */
   readonly health: { readonly pingTimeoutMs: number; readonly pingIntervalMs: number };
+  /**
+   * The hello crash policy's configurable part: config crash.first_chance_blocking / BEA_CRASH_FIRST_CHANCE_BLOCKING
+   * (default false) and crash.passthrough_modules (default none; ASan's runtime and shadow always pass through).
+   */
+  readonly crash: { readonly firstChanceBlocking: boolean; readonly passthroughModules: readonly string[] };
 }
 
 const KiB = 1024;
@@ -99,7 +105,7 @@ export const hostLimitsFrom = (config: BeaConfig): HostLimits => ({
     adoptMs: 3_000,
     inspectMs: 3_000,
     watchMs: 3_000,
-    attachMs: 10_000,
+    attachMs: config.limits.attachTimeoutMs.value,
     createScriptMs: 10_000,
     loadMs: 10_000,
     readyMs: 5_000,
@@ -149,6 +155,10 @@ export const hostLimitsFrom = (config: BeaConfig): HostLimits => ({
   exitReportGraceMs: 2_000,
   userScript: { maxMessageBytes: 64 * KiB, maxErrors: 16, unloadMs: 2_000 },
   health: { pingTimeoutMs: 1_000, pingIntervalMs: 2_000 },
+  crash: {
+    firstChanceBlocking: config.crash.firstChanceBlocking.value,
+    passthroughModules: config.crash.passthroughModules.value,
+  },
 });
 
 /** The suffix every fixed-cap refusal carries (rea-mcp §6.2). */

@@ -45,6 +45,7 @@ import type { FridaHost } from "./FridaHost.js";
 import type { CancellableLike } from "./fridaPorts.js";
 import { NO_RUNTIME_OVERRIDE, type HostLimits } from "./hostLimits.js";
 import type { PeHeaderFacts } from "./peHeader.js";
+import { withFridaMessage } from "./rpcErrors.js";
 import { SessionRecord } from "./SessionRecord.js";
 import { isStartupState, visibleState } from "./sessionStates.js";
 import { guard, preflightSpawn, runSpawn, type SpawnDeps } from "./spawnSession.js";
@@ -367,7 +368,11 @@ export class SessionManager implements DynamicSessionPort {
       return err(
         resumed.kind === "timeout"
           ? { _tag: "ProviderTimeout", operation, timeout_ms: this.#deps.limits.startup.resumeGuardMs, phase: "resume" }
-          : { _tag: "ProviderFailure", operation, provider: "frida", diagnostics: { phase: "resume" } },
+          : withFridaMessage(
+              { _tag: "ProviderFailure", operation, provider: "frida", diagnostics: { phase: "resume" } },
+              resumed.cause,
+              record.literals,
+            ),
       );
     }
     record.resumedAt = this.#deps.clock.monoMs();

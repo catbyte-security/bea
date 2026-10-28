@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { ATTACH_TIMEOUT_MS } from "../../domain/config.js";
 import type { BeaError } from "../../domain/errors/beaError.js";
 import type { AgentIdentity } from "../../domain/evidence/record.js";
 import type { MmId, PiId, StId } from "../../domain/ids.js";
@@ -77,11 +78,13 @@ export class StepClock {
 /**
  * "system" is not a crash class (review fix AGENT-11): Frida maps every code it does not know to "system", which
  * includes C++ throws, OutputDebugString and thread naming. Those stay first-chance rows; an unhandled one is still
- * reported at last chance with its NTSTATUS. The hello's policy replaces the agent's default, so it must match it.
+ * reported at last chance with its NTSTATUS. The hello's policy replaces the agent's default
+ * (src/agent/pure/coreCrash.ts), so it must match it. first_chance_blocking is opt-in (BEA-FEEDBACK #4): a blocking
+ * report runs on the faulting thread, which may hold the target's own locks (ASan's allocator, JITs, drivers).
  */
 const DEFAULT_CRASH_POLICY: CrashPolicy = {
   first_chance_rows: true,
-  first_chance_blocking: true,
+  first_chance_blocking: false,
   crash_class: ["access-violation", "illegal-instruction", "stack-overflow", "arithmetic", "abort"],
   ack_timeout_ms: 1000,
   last_chance_ack_timeout_ms: 2000,
@@ -90,7 +93,30 @@ const DEFAULT_CRASH_POLICY: CrashPolicy = {
   stack_bytes: 256,
   backtrace_depth: 32,
   include_xmm: false,
+  passthrough_modules: [],
 };
+
+/** The hello's crash policy: the defaults plus the configured part (config crash.*, BEA_CRASH_FIRST_CHANCE_BLOCKING). */
+export const helloCrashPolicy = (crash: HostLimits["crash"]): CrashPolicy => ({
+  ...DEFAULT_CRASH_POLICY,
+  crash_class: [...DEFAULT_CRASH_POLICY.crash_class],
+  first_chance_blocking: crash.firstChanceBlocking,
+  passthrough_modules: [...crash.passthroughModules],
+});
+
+/**
+ * A Frida attach (the injection) that ran out of its deadline names the setting that bounds it (BEA-FEEDBACK #3): a
+ * large or busy target may need longer, while a wedged one (a deadlocked process) does not attach with any deadline.
+ */
+const attachTimeout = (operation: string, ms: number): BeaError => ({
+  _tag: "ProviderTimeout",
+  operation,
+  timeout_ms: ms,
+  phase: "attach",
+  message: `${operation} did not finish within ${String(ms)} ms (phase attach; limits.attach_timeout_ms / BEA_ATTACH_TIMEOUT_MS).`,
+  remediation: `Frida's attach (the agent injection) is bounded by limits.attach_timeout_ms in BEA_HOME/config.json or the BEA_ATTACH_TIMEOUT_MS environment variable (${String(ATTACH_TIMEOUT_MS.min)}-${String(ATTACH_TIMEOUT_MS.max)} ms; now ${String(ms)} ms); restart BEA with a larger value for a large or busy target. A target that is deadlocked or suspended does not attach with a longer deadline either: check that it still makes progress.`,
+  diagnostics: { setting: "limits.attach_timeout_ms", env: "BEA_ATTACH_TIMEOUT_MS" },
+});
 
 /**
  * Bounded step: resolves the work, or a provider_timeout when `ms` passes first, or the op's abort. With
@@ -163,7 +189,11 @@ export const fridaStep = async <T>(
     const aborted = abortedError(op.signal, op.name, { deadline: op.deadline, phase });
     if (aborted !== null) return err(aborted);
     if (deadline?.cancel.outcome() === "deadline")
-      return err({ _tag: "ProviderTimeout", operation: op.name, timeout_ms: deadline.ms, phase });
+      return err(
+        phase === "attach"
+          ? attachTimeout(op.name, deadline.ms)
+          : { _tag: "ProviderTimeout", operation: op.name, timeout_ms: deadline.ms, phase },
+      );
     return err(fridaStepError(op.name, phase, cause));
   }
 };
@@ -333,7 +363,7 @@ const helloParams = (ctx: StartupContext, record: SessionRecord, instanceId: PiI
     flow_high_water_bytes: ctx.limits.hello.highWaterBytes,
     flow_low_water_bytes: ctx.limits.hello.lowWaterBytes,
   },
-  crash: DEFAULT_CRASH_POLICY,
+  crash: helloCrashPolicy(ctx.limits.crash),
   streams: { flush_ms: ctx.limits.hello.flushMs, exceptions: true, threads: true },
   flow: { high_water_bytes: ctx.limits.hello.highWaterBytes, low_water_bytes: ctx.limits.hello.lowWaterBytes },
 });

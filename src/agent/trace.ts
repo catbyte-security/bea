@@ -17,7 +17,11 @@
 // first), so the thread reaches the gate at its next block; and a deferred follow refuses an entry made from translated
 // code (an old exec context still running). Review fix AGENT-6: a stopped trace drops its kernels, blocks and counters
 // (the registry keeps the 64 newest ended instruments, and their revert closures kept the whole trace alive).
+// BEA-FEEDBACK item 6: a deferred follow (a thread blocked in a system call; see deferFollow) hooks a stub that every
+// thread of the process waits in. Its listener is native (one CModule): other threads never enter JS or take a lock,
+// only a target calls back into JS to be followed, and the listener is detached once every target is followed.
 // =================================================================================================
+import { HOOK_DENY_LIST } from "../shared/apiProfiles.js";
 import { BINARY_LAYOUTS } from "../shared/binaryLayouts.js";
 import type {
   AgentError,
@@ -44,6 +48,17 @@ import {
   synthesizeEntryBlock,
   type CodeRange,
 } from "./pure/traceBlocks.js";
+import {
+  DEFERRED_SLOTS,
+  DeferredSlots,
+  onInvokeCandidates,
+  redirectOf,
+  relocatedPrologue,
+  syscallStubAt,
+  SYSCALL_STUB_BYTES,
+  SYSCALL_STUB_PROLOGUE,
+  SYSCALL_STUB_RETURN,
+} from "./pure/traceDeferred.js";
 import type { AgentCore } from "./state.js";
 import { createKernels, type KernelSet } from "./traceKernels.js";
 
@@ -231,7 +246,10 @@ interface Trace {
   readonly handle: TraceHandle;
   readonly mode: TraceStartParams["mode"];
   readonly ranges: CodeRange[];
+  /** threads mode: the claimed threads; on_call: the threads that ran an invocation */
   readonly tids: Set<ThreadId>;
+  /** threads mode: the claimed threads Stalker follows (directly, or since their deferred entry) */
+  readonly followed: Set<ThreadId>;
   blocks: BlockSet | null;
   kernels: KernelSet | null;
   last: Map<number, bigint>;
@@ -243,9 +261,7 @@ interface Trace {
   inFlight: ThreadId | null;
   observer: ThreadObserver | null;
   /** threads-mode follows deferred to the thread's next entry into the system-call stub it was blocked in */
-  deferred: InvocationListener[];
-  /** the stubs of `deferred` (invalidated for other traces' threads when the listeners detach) */
-  deferredSites: NativePointer[];
+  readonly groups: DeferredGroup[];
   /** the stop protocol started: no new invocation is followed */
   ending: boolean;
   /** the final rows were emitted: late Stalker batches are ignored */
@@ -420,18 +436,8 @@ const reentryPoints = (t: Trace): NativePointer[] => {
   return [...out].map(ptrOf);
 };
 
-const unfollowAll = (t: Trace, co: StalkerCo | null): void => {
-  const detached: NativePointer[] = [];
-  if (t.listener !== null || t.deferred.length > 0) {
-    if (t.listener !== null && t.entry !== null) detached.push(t.entry);
-    detached.push(...t.deferredSites.splice(0));
-    t.listener?.detach();
-    t.listener = null;
-    for (const listener of t.deferred.splice(0)) listener.detach();
-    Interceptor.flush();
-  }
-  // on_call: only the thread inside an invocation is still followed (onLeave unfollowed the others)
-  const tids = t.entry === null ? [...t.tids] : t.inFlight === null ? [] : [t.inFlight];
+/** Stalker.unfollow each thread and invalidate the trace's blocks for it, so it leaves at its next block (AGENT-8). */
+const unfollowThreads = (t: Trace, tids: readonly ThreadId[]): void => {
   const points = tids.length > 0 ? reentryPoints(t) : [];
   for (const tid of tids) {
     try {
@@ -450,6 +456,20 @@ const unfollowAll = (t: Trace, co: StalkerCo | null): void => {
       }
     }
   }
+};
+
+const unfollowAll = (t: Trace, co: StalkerCo | null): void => {
+  const detached: NativePointer[] = [];
+  if (t.listener !== null) {
+    if (t.entry !== null) detached.push(t.entry);
+    t.listener.detach();
+    t.listener = null;
+  }
+  for (const g of t.groups) detached.push(...detachGroup(g));
+  if (detached.length > 0) Interceptor.flush();
+  // threads mode: the threads followed so far (a deferred thread that never re-entered its stub was never followed);
+  // on_call: only the thread inside an invocation is still followed (onLeave unfollowed the others)
+  unfollowThreads(t, t.entry === null ? [...t.followed] : t.inFlight === null ? [] : [t.inFlight]);
   t.kernels?.setGate(false);
   // other traces' followed threads must not keep running the detached listeners' trampolines (S4 §12.1, AGENT-7)
   if (detached.length > 0) co?.invalidateAll(detached);
@@ -460,10 +480,12 @@ const stopTrace = async (s: TraceCoreSeam, t: Trace): Promise<TraceRevert> => {
   t.ending = true;
   if (t.snapshot !== null) clearInterval(t.snapshot);
   if (t.observer !== null) t.observer.detach();
+  const late = lateFollows(t);
   unfollowAll(t, s.stalkerCo());
   Stalker.flush();
   const drain = Math.max(Stalker.queueDrainInterval, s.limits().stalker_drain_ms);
   await new Promise<void>((resolve) => setTimeout(resolve, 2 * drain)); // the last onReceive batches land here
+  await settleLateFollows(t, late);
   if (t.kernels !== null) {
     const rows = takeDeltas(t);
     if (t.entry !== null && t.mode !== "call_summary") {
@@ -481,7 +503,12 @@ const stopTrace = async (s: TraceCoreSeam, t: Trace): Promise<TraceRevert> => {
   }
   t.closed = true;
   Stalker.garbageCollect();
-  if (t.entry === null) for (const tid of t.tids) releaseThread(s, tid);
+  // a followed thread settles before its next follow; a deferred one that was never followed is free at once
+  if (t.entry === null)
+    for (const tid of t.tids) {
+      if (t.followed.has(tid)) releaseThread(s, tid);
+      else s.stalkerCo().forget(tid);
+    }
   else if (t.inFlight !== null) releaseThread(s, t.inFlight);
   t.kernels?.release(s.limits().stalker_settle_ms);
   // AGENT-6: nothing reads them after the final rows; the registry keeps ended instruments (and so this Trace)
@@ -521,19 +548,226 @@ const startOnCall = (s: TraceCoreSeam, t: Trace, target: NativePointer): void =>
   s.stalkerCo().invalidateAll([target]);
 };
 
-/** The canonical Win64 system-call stub: `mov r10, rcx; mov eax, imm32; …; syscall (stub+0x12); ret (stub+0x14)`. */
-const SYSCALL_STUB_HEAD = 0xb8d18b4c; // 4c 8b d1 b8, little endian
-const SYSCALL_RETURN_OFFSET = 0x14;
+// ---------------------------------------------------------------- deferred follows (threads mode)
 
-/** The stub a thread is blocked in (its pc is right after a stub's `syscall`), else null. */
+/**
+ * The stub a thread is blocked in (its pc is the `ret` right after a canonical stub's `syscall`), else null. A stub
+ * another instrument already hooks still counts (its prologue is a redirect): following such a thread remotely would
+ * take the debug-register path deferFollow exists to avoid.
+ */
 const blockedInStub = (tid: ThreadId): NativePointer | null => {
   const thread = Process.enumerateThreads().find((th) => th.id === tid);
   if (thread === undefined) return null;
   try {
-    const pc = thread.context.pc;
-    if (pc.sub(2).readU16() !== 0x050f) return null;
-    const stub = pc.sub(SYSCALL_RETURN_OFFSET);
-    return stub.readU32() === SYSCALL_STUB_HEAD ? stub : null;
+    const stub = thread.context.pc.sub(SYSCALL_STUB_RETURN);
+    const bytes = stub.readByteArray(SYSCALL_STUB_BYTES);
+    return bytes !== null && syscallStubAt(new Uint8Array(bytes)) !== null ? stub : null;
+  } catch {
+    return null;
+  }
+};
+
+let deniedStubs: Set<string> | null = null;
+/**
+ * HOOK_DENY_LIST functions (S4 F8: a listener there, native too, deadlocked the target at its next CreateThread). A
+ * thread sampled inside one is refused, never deferred there; it cannot be followed remotely either: gum's exceptor
+ * allocates, so a debug register at NtAllocateVirtualMemory's return re-traps inside the exceptor (the deadlock above).
+ */
+const deniedStub = (stub: NativePointer): boolean => {
+  if (deniedStubs === null) {
+    deniedStubs = new Set();
+    for (const d of HOOK_DENY_LIST) {
+      const [module, name] = d.api.split("!");
+      try {
+        const va = Process.findModuleByName(module ?? "")?.findExportByName(name ?? "") ?? null;
+        if (va !== null) deniedStubs.add(va.toString());
+      } catch {
+        // not loaded
+      }
+    }
+  }
+  return deniedStubs.has(stub.toString());
+};
+
+/** Keep in sync with BeaDeferred (136 bytes): the armed flag, the target table and its per-slot "inside" flags. */
+const DF_LAYOUT = { armed: 0, n: 4, tids: 8, inside: 8 + 4 * DEFERRED_SLOTS, size: 8 + 8 * DEFERRED_SLOTS } as const;
+
+/**
+ * The deferred-follow listener (BEA-FEEDBACK item 6). It sits on a system-call stub that every thread of the process
+ * enters (each wait of a 50-thread Chrome GPU process went through a JS callback and the script lock, and the process
+ * wedged), so its onEnter is native: it never enters JS and takes no lock, it compares the thread id with the group's
+ * table and returns. Only a target calls bea_df_follow (a NativeCallback), which follows it from that callback's JS
+ * scope (gum_stalker_follow_me when the scope ends, as in the on_call listener), so no debug register is armed. While
+ * a target is inside that call its `inside` flag is set: a follow it requested starts only after the JS lock is
+ * released, so a stop at that moment waits for it (settleLateFollows).
+ */
+const DEFERRED_FOLLOW_C = `
+#include <gum/guminterceptor.h>
+
+typedef struct {
+  volatile gint32 armed;
+  guint32 n;
+  volatile guint32 tids[${String(DEFERRED_SLOTS)}];
+  volatile gint32 inside[${String(DEFERRED_SLOTS)}];
+} BeaDeferred;
+
+extern void bea_df_follow (BeaDeferred * group, gpointer return_address);
+
+void
+bea_df_enter (GumInvocationContext * ic)
+{
+  BeaDeferred * d = GUM_IC_GET_FUNC_DATA (ic, BeaDeferred *);
+  guint32 tid;
+  guint32 i;
+  if (d->armed == 0)
+    return;
+  tid = (guint32) gum_invocation_context_get_thread_id (ic);
+  for (i = 0; i != d->n; i++)
+  {
+    if (d->tids[i] == tid)
+    {
+      d->inside[i] = 1;
+      bea_df_follow (d, gum_invocation_context_get_return_address (ic));
+      d->inside[i] = 0;
+      return;
+    }
+  }
+}
+`;
+
+interface DeferredGroup {
+  readonly trace: Trace;
+  readonly stub: NativePointer;
+  /** BeaDeferred, the listener's data */
+  readonly cell: NativePointer;
+  /** the targets still waiting for their next entry (mirrors the native table) */
+  readonly slots: DeferredSlots;
+  /** slot → thread id at creation (the native table zeroes a slot once its thread was followed) */
+  readonly targets: readonly ThreadId[];
+  listener: InvocationListener | null;
+  /**
+   * Block starts of the listener's trampoline (on_enter entry, on_invoke candidates) that followed threads drop when it
+   * is detached (pure/traceDeferred.ts); null when they could not be located: the listener then stays attached,
+   * disarmed, until the trace stops.
+   */
+  trampoline: NativePointer[] | null;
+}
+
+/** By cell address; a group leaves the map when its listener is detached (a late entry then finds nothing). */
+const deferredGroups = new Map<string, DeferredGroup>();
+/**
+ * QJS frees unreferenced native code and memory at once (a CModule freed under a followed thread crashed the target,
+ * ext-frida §3.8): the CModule, the NativeCallback and every group cell stay referenced for the agent's lifetime, since
+ * a thread can still be inside the listener after its detach (a few hundred bytes per deferred group).
+ */
+const deferredPins: unknown[] = [];
+let deferredEnter: NativePointer | null = null;
+
+/** bea_df_enter, compiled once per agent (TinyCC). */
+const deferredKernel = (): NativePointer => {
+  if (deferredEnter !== null) return deferredEnter;
+  const follow = new NativeCallback(onTargetEntry, "void", ["pointer", "pointer"]);
+  const cm = new CModule(DEFERRED_FOLLOW_C, { bea_df_follow: follow });
+  const enter = cm["bea_df_enter"];
+  if (enter === undefined) throw new Error("deferred-follow kernel symbol missing");
+  deferredPins.push(follow, cm);
+  deferredEnter = enter;
+  return enter;
+};
+
+const writeSlot = (g: DeferredGroup, slot: number): void => {
+  g.cell.add(DF_LAYOUT.tids + 4 * slot).writeU32(0);
+  if (g.slots.empty) g.cell.add(DF_LAYOUT.armed).writeS32(0);
+};
+
+/**
+ * bea_df_follow: runs on a target thread inside the stub's listener, holding the JS lock. The thread is followed from
+ * this entry (Stalker starts when this callback's scope ends) unless the trace is stopping. AGENT-8: for a thread an
+ * earlier trace unfollowed, an entry made from code outside every module comes from that trace's exec context, which
+ * has not let go of the thread yet; following from there creates a context that the old one's pending unfollow then
+ * ends, so the slot stays armed for the thread's next entry from module code. Once every target is followed the
+ * listener is detached (on the JS thread).
+ */
+function onTargetEntry(cell: NativePointer, returnAddress: NativePointer): void {
+  try {
+    const g = deferredGroups.get(cell.toString());
+    const tid = Process.getCurrentThreadId();
+    if (g === undefined || g.listener === null || g.trace.ending || !g.slots.has(tid)) return;
+    if (state.released.has(tid) && Process.findModuleByAddress(returnAddress) === null) return;
+    const t = g.trace;
+    writeSlot(g, g.slots.take(tid));
+    t.followed.add(tid);
+    Stalker.follow(tid, followOptions(t));
+    if (g.slots.empty && g.trampoline !== null) setTimeout(() => retireGroup(g), 0);
+  } catch (e) {
+    state.seam?.fault("trace.deferredFollow", e);
+  }
+}
+
+/** Detach a group's listener (the caller flushes and invalidates); the addresses followed threads must drop. */
+const detachGroup = (g: DeferredGroup): NativePointer[] => {
+  const listener = g.listener;
+  if (listener === null) return [];
+  g.listener = null;
+  g.cell.add(DF_LAYOUT.armed).writeS32(0);
+  deferredGroups.delete(g.cell.toString());
+  listener.detach();
+  return [g.stub, ...(g.trampoline ?? [])];
+};
+
+/**
+ * Every target of the group is followed: remove the listener now instead of at the stop, so the process's waits no
+ * longer pass through it. Followed threads (the targets included) drop their translations of the stub (AGENT-7) and of
+ * the freed trampoline, which Gum may hand to the next hook at once (pure/traceDeferred.ts).
+ */
+const retireGroup = (g: DeferredGroup): void => {
+  try {
+    if (g.trace.ending) return; // the stop detaches it
+    const points = detachGroup(g);
+    if (points.length === 0) return;
+    Interceptor.flush();
+    state.seam?.stalkerCo().invalidateAll(points);
+  } catch (e) {
+    state.seam?.fault("trace.retireDeferred", e);
+  }
+};
+
+/** A thread left (exited): free its slot, so a later thread that reuses the id is never followed. */
+const forgetTarget = (t: Trace, tid: ThreadId): void => {
+  for (const g of t.groups) {
+    const slot = g.slots.take(tid);
+    if (slot < 0) continue;
+    writeSlot(g, slot);
+    if (g.slots.empty && g.trampoline !== null) setTimeout(() => retireGroup(g), 0);
+  }
+};
+
+/** Bytes at `p`: `n`, or up to the end of `p`'s page when the next page is not readable. */
+const readUpTo = (p: NativePointer, n: number): Uint8Array => {
+  try {
+    return new Uint8Array(p.readByteArray(n) ?? new ArrayBuffer(0));
+  } catch {
+    const toPageEnd = Process.pageSize - Number(toBig(p) % BigInt(Process.pageSize));
+    return new Uint8Array(p.readByteArray(Math.min(n, toPageEnd)) ?? new ArrayBuffer(0));
+  }
+};
+
+/** An Interceptor code slice (GUM_INTERCEPTOR_CODE_SLICE_SIZE) holds the whole trampoline after its entry. */
+const TRAMPOLINE_WINDOW = 256;
+
+/**
+ * The trampoline block starts of the listener just attached to `stub` (`prologue`: its first bytes, read before): the
+ * redirect's target (on_enter) and where the prologue was relocated to (on_invoke). A stub another instrument hooked
+ * first shares that hook's trampoline. Null when the layout is not the expected one.
+ */
+const trampolineOf = (stub: NativePointer, prologue: Uint8Array): NativePointer[] | null => {
+  try {
+    const redirect = redirectOf(readUpTo(stub, 6), toBig(stub));
+    if (redirect === null) return null;
+    const entry = redirect.kind === "near" ? redirect.target : toBig(ptrOf(redirect.slot).readPointer());
+    const window = readUpTo(ptrOf(entry), TRAMPOLINE_WINDOW);
+    const invoke = onInvokeCandidates(window, entry, relocatedPrologue(prologue));
+    return invoke.length === 0 ? null : [entry, ...invoke].map(ptrOf);
   } catch {
     return null;
   }
@@ -543,25 +777,62 @@ const blockedInStub = (tid: ThreadId): NativePointer | null => {
  * Frida 17.23.2 mitigation (WP18; docs/limitations.md, "trace_execution threads"): Stalker.follow(tid) of a thread
  * blocked in a system call arms a debug register at the stub's return, and gum's exceptor can re-trap on it inside its
  * own critical section (its allocator yields through SleepEx(0), which returns through the same address), which
- * deadlocks the thread and then the agent. Such a thread is followed from its own next entry into that stub instead:
- * an Interceptor listener on the stub follows the current thread (the on_call path, VERIFIED CT-lab E10), so no debug
- * register is armed. The thread's first wake-up up to that entry is not traced (a game loop loses at most one frame).
+ * deadlocks the thread and then the agent. Such a thread is followed from its own next entry into that stub instead
+ * (the native listener above), so no debug register is armed. The thread's first wake-up up to that entry is not
+ * traced (a game loop loses at most one frame).
  */
-const followAtNextEntry = (t: Trace, stub: NativePointer, tids: Set<ThreadId>): void => {
-  const listener = Interceptor.attach(stub, {
-    onEnter() {
-      if (!tids.has(this.threadId) || t.ending) return;
-      // AGENT-8: for a thread an earlier trace unfollowed, an entry made from code outside every module comes from that
-      // trace's exec context, which has not let go of the thread yet; following from there creates a context that the
-      // old one's pending unfollow then ends. Stay armed for the thread's next entry from module code.
-      if (state.released.has(this.threadId) && Process.findModuleByAddress(this.returnAddress) === null) return;
-      tids.delete(this.threadId);
-      Stalker.follow(this.threadId, followOptions(t));
-    },
-  });
-  Interceptor.flush();
-  t.deferred.push(listener);
-  t.deferredSites.push(stub);
+const deferFollow = (t: Trace, stub: NativePointer, tids: readonly ThreadId[]): void => {
+  const enter = deferredKernel();
+  const prologue = readUpTo(stub, SYSCALL_STUB_PROLOGUE); // before the hook overwrites it
+  const slots = new DeferredSlots(tids);
+  const cell = Memory.alloc(DF_LAYOUT.size);
+  deferredPins.push(cell);
+  cell.writeByteArray(Array.from({ length: DF_LAYOUT.size }, () => 0));
+  cell.add(DF_LAYOUT.n).writeU32(slots.size);
+  slots.table().forEach((tid, i) => cell.add(DF_LAYOUT.tids + 4 * i).writeU32(tid));
+  cell.add(DF_LAYOUT.armed).writeS32(1);
+  const g: DeferredGroup = { trace: t, stub, cell, slots, targets: [...tids], listener: null, trampoline: null };
+  deferredGroups.set(cell.toString(), g);
+  try {
+    g.listener = Interceptor.attach(stub, { onEnter: enter }, cell);
+    Interceptor.flush();
+  } catch (e) {
+    cell.add(DF_LAYOUT.armed).writeS32(0);
+    deferredGroups.delete(cell.toString());
+    throw e;
+  }
+  t.groups.push(g);
+  g.trampoline = trampolineOf(stub, prologue);
+};
+
+interface LateFollow {
+  readonly g: DeferredGroup;
+  readonly slot: number;
+  readonly tid: ThreadId;
+}
+const insideOf = (l: LateFollow): boolean => l.g.cell.add(DF_LAYOUT.inside + 4 * l.slot).readS32() !== 0;
+
+/** Targets still inside their group's callback although their follow was requested: it starts once that scope ends. */
+const lateFollows = (t: Trace): LateFollow[] =>
+  t.groups.flatMap((g) =>
+    g.targets.map((tid, slot) => ({ g, slot, tid })).filter((l) => t.followed.has(l.tid) && insideOf(l)),
+  );
+
+const LATE_FOLLOW_WAIT_MS = 1000;
+
+/**
+ * A follow requested just before the stop starts after the JS lock was released, so unfollowAll may have found nothing
+ * to unfollow yet. Wait (≤ 1 s) until those targets left their callback, then unfollow them again (a no-op for a thread
+ * that is no longer followed).
+ */
+const settleLateFollows = async (t: Trace, late: readonly LateFollow[]): Promise<void> => {
+  if (late.length === 0) return;
+  const deadline = Date.now() + LATE_FOLLOW_WAIT_MS;
+  while (late.some(insideOf) && Date.now() < deadline) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  unfollowThreads(
+    t,
+    late.map((l) => l.tid),
+  );
 };
 
 const startThreads = (s: TraceCoreSeam, t: Trace, tids: readonly ThreadId[]): AgentError | null => {
@@ -574,23 +845,55 @@ const startThreads = (s: TraceCoreSeam, t: Trace, tids: readonly ThreadId[]): Ag
     }
     t.tids.add(tid);
   }
-  const atNextEntry = new Map<string, { stub: NativePointer; tids: Set<ThreadId> }>();
+  // the blocked threads' listeners first: nothing is followed yet if one of them cannot be installed
+  const running: ThreadId[] = [];
+  const blocked = new Map<string, { stub: NativePointer; tids: ThreadId[] }>();
   for (const tid of t.tids) {
     const stub = blockedInStub(tid);
     if (stub === null) {
-      Stalker.follow(tid, followOptions(t));
+      running.push(tid);
       continue;
     }
-    const key = stub.toString();
-    const group = atNextEntry.get(key) ?? { stub, tids: new Set<ThreadId>() };
-    group.tids.add(tid);
-    atNextEntry.set(key, group);
+    const group = blocked.get(stub.toString()) ?? { stub, tids: [] };
+    group.tids.push(tid);
+    blocked.set(stub.toString(), group);
   }
-  for (const group of atNextEntry.values()) followAtNextEntry(t, group.stub, group.tids);
+  const giveUp = (error: AgentError): AgentError => {
+    for (const tid of t.tids) s.stalkerCo().forget(tid); // claimed, never followed: no settle period
+    t.tids.clear();
+    return error;
+  };
+  for (const group of blocked.values())
+    if (deniedStub(group.stub))
+      return giveUp({
+        _tag: "ThreadBusy",
+        message: "the thread is inside a system call whose stub must not be hooked (deadlock risk); retry the trace",
+        thread_id: group.tids[0] ?? 0,
+        reason: "in-syscall",
+      });
+  try {
+    for (const group of blocked.values()) deferFollow(t, group.stub, group.tids);
+  } catch (e) {
+    const detached = t.groups.flatMap(detachGroup);
+    Interceptor.flush();
+    s.stalkerCo().invalidateAll(detached);
+    return giveUp({
+      _tag: "Internal",
+      message: "the deferred follow of a thread blocked in a system call could not be installed",
+      where: "trace.deferFollow",
+      frida_message: String(e).slice(0, 200),
+    });
+  }
+  for (const tid of running) {
+    Stalker.follow(tid, followOptions(t));
+    t.followed.add(tid);
+  }
   t.observer = Process.attachThreadObserver({
     onRemoved: (th) => {
       if (!t.tids.has(th.id)) return;
       t.tids.delete(th.id);
+      t.followed.delete(th.id);
+      forgetTarget(t, th.id);
       s.stalkerCo().forget(th.id);
       if (t.tids.size === 0) t.handle.end("thread-exit");
     },
@@ -694,6 +997,7 @@ const newTrace = (handle: TraceHandle, p: TraceStartParams, plan: TracePlan): Tr
   mode: p.mode,
   ranges: plan.modules.map(rangeOf),
   tids: new Set(),
+  followed: new Set(),
   blocks: p.mode === "coverage" && p.on_call === undefined ? new BlockSet(plan.cap) : null,
   kernels: plan.kernels,
   last: new Map(),
@@ -704,8 +1008,7 @@ const newTrace = (handle: TraceHandle, p: TraceStartParams, plan: TracePlan): Tr
   maxInvocations: p.on_call?.invocations ?? 0,
   inFlight: null,
   observer: null,
-  deferred: [],
-  deferredSites: [],
+  groups: [],
   ending: false,
   closed: false,
 });

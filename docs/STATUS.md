@@ -313,17 +313,54 @@ opening file"; BEA now leaves the extraction in `%TEMP%` when the path would not
   only node/python processes running belong to unrelated sessions). `%TEMP%\bea-*` directories: 220 → 220. The
   snapshot `build/dist-snapshots/final` was removed.
 
+## Dogfooding fixes (2026-10-29)
+
+An agent that used BEA on Chrome's GPU process reported seven issues (FB-1 to FB-7). Their decisions are in
+[decisions.md](decisions.md), and the user-facing changes are in `CHANGELOG.md` under "Unreleased".
+
+| Item                        | Fix                                                                                                                                                |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FB-2 folded unwind info     | real function starts were refused as "not a function start" (98% of `chrome.dll`): only chained/indirect unwind links are cached now               |
+| FB-4 ASan deadlock          | crash backtraces use ntdll's unwinder, never dbghelp; blocking first-chance reports are opt-in; ASan runtime and shadow faults pass through        |
+| FB-6 thread-mode stall      | the deferred-follow stub listener is native: other threads never enter JavaScript                                                                  |
+| FB-1 CIG / ACG              | refused before injection (`code-integrity-guard`, `arbitrary-code-guard`); Frida's own failure text is kept in `details.diagnostics.frida_message` |
+| FB-3 attach deadline        | `limits.attach_timeout_ms` / `BEA_ATTACH_TIMEOUT_MS`                                                                                               |
+| FB-5 thread names           | `list_threads` returns `name`                                                                                                                      |
+| FB-7 `on_call` context loss | documented, not root-caused                                                                                                                        |
+
+All lanes were run on one build; the lanes that use the built server ran against a snapshot of it:
+
+- `npm run check` exits 0.
+- `npm test`: **1,471 passed, 0 failed**, 5 named skips.
+- smoke: exit 0.
+- process + emulation + HTTP lanes: **82/82**.
+- Full acceptance, run three times: the first run had **2 failures**; the second and third passed **236/236**.
+  - In the first run, the AGENT-7 test (a thread-mode trace that never started within 10 s) and the `trace_api`
+    behavior table (`behavior.exe` did not print `DONE` within 30 s) failed.
+  - Two isolated runs of those two files each failed one different test: AGENT-6 (`Invalid PID`) and the behavior
+    table.
+  - A standalone repro of the behavior-table scenario passed 4 of 4.
+  - The suite was clean in three runs before these fixes, so treat these as intermittent failures to investigate.
+
 ## Next steps
 
-1. Revisit the integrator decisions: the two raised budgets and the knip `@public` tags ([decisions.md](decisions.md),
+1. Investigate the intermittent acceptance failures seen after the dogfooding fixes (AGENT-7, AGENT-6, the
+   `trace_api` behavior table), which appear when acceptance files run in parallel.
+2. Use the new ntdll unwinder for hook and watch backtraces and for `symbol_hints`, which still use dbghelp and can
+   deadlock on ASan targets.
+3. Add each detached hook's trampoline blocks to `invalidateAll` for every detach while threads are followed. The
+   FB-6 slice-reuse exposure applies to hooks, profiles, overrides and the `on_call` listener.
+4. From the feedback: a many-probe coverage tool (thousands of one-shot probes, native engine) and per-function
+   coverage from a PDB function list.
+5. Revisit the integrator decisions: the two raised budgets and the knip `@public` tags ([decisions.md](decisions.md),
    release stage).
-2. Report the Frida 17.23.2 exceptor deadlock upstream (WP9's stack analysis is summarized in decisions.md).
-3. The review's remainders: a `bea-jobhost` adopt mode started before the spawn (closes the LIFE-4 window) and an
+6. Report the Frida 17.23.2 exceptor deadlock upstream (WP9's stack analysis is summarized in decisions.md).
+7. The review's remainders: a `bea-jobhost` adopt mode started before the spawn (closes the LIFE-4 window) and an
    `inspect` mode (spawn-intent recovery, SEC-6 pre-injection module check on attach); redaction of hook/query
    captures (SEC-3); `method:"auto"` splitting a range across debug registers (AGENT-3); NaN tagging in the
    bridge (EMU-7).
-4. Remaining feature work from the deferred list: trace_api rows on the core stream registry (flow control, acked exit
+8. Remaining feature work from the deferred list: trace_api rows on the core stream registry (flow control, acked exit
    flush), agent counters in hook summaries under sampling, emulation `list_modules` evidence, the HTTP owner-only
    ACL, CLI help for built-in commands, `bea evidence show --run`.
-5. Try BEA on real targets you own or are authorized to analyze. Check a game's anti-cheat status before attaching:
+9. Try BEA on real targets you own or are authorized to analyze. Check a game's anti-cheat status before attaching:
    BEA refuses targets with anti-cheat signals unless the user overrides.

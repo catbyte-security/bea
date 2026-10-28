@@ -29,6 +29,8 @@ export const INSPECT_CAPS = {
   insnHexChars: 30,
   insnText: 120,
   ref: 160,
+  /** thread descriptions (SetThreadDescription; Chrome's are under 40 characters) */
+  threadName: 128,
   readValues: 16_384,
   readBytes: 65_536,
   scalarChars: 24,
@@ -128,6 +130,8 @@ const locOutSchema = z.strictObject({
 });
 export const threadRowSchema = z.strictObject({
   tid: z.number().int().min(0).max(4_294_967_295),
+  /** the thread's description (SetThreadDescription; untrusted target text); null when it has none */
+  name: z.string().max(INSPECT_CAPS.threadName).nullable(),
   main: z.boolean(),
   entry: locOutSchema.nullable(),
   registers: z
@@ -284,7 +288,7 @@ export const INSPECT_TOOLS = [
     phase: "P2",
     title: "List Threads",
     description:
-      "List the target's threads (tid, entry routine as module+RVA, main flag) and optionally their general registers. Thread state and names are unreliable on Windows and are not reported. Use the tids for call_function thread_id, trace_execution thread_ids and hook thread filters. Read-only through the injected agent.",
+      "List the target's threads (tid, name the program set with SetThreadDescription or null, entry routine as module+RVA, main flag) and optionally their general registers. Thread state is unreliable on Windows and is not reported. Use the tids for call_function thread_id, trace_execution thread_ids and hook thread filters. Read-only through the injected agent.",
     inputSchema: listThreadsInputSchema,
     outputSchema: listThreadsOutputSchema,
     effects: READ_EFFECTS,
